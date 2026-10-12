@@ -1,0 +1,9 @@
+# New releases stay out for 48 hours before they resolve here (pnpm minimumReleaseAge), the window the other
+# tracepanel repositories use too.
+minimumReleaseAge: 2880
+# esbuild (vitest's bundler) checks its platform binary after install.
+allowBuilds:
+  esbuild: true
+# Tracepanel's own packages (the agent's binaries) are released with this one.
+minimumReleaseAgeExclude:
+  - "@tracepanel/*"
