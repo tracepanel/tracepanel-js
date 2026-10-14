@@ -6,6 +6,7 @@ import { type Context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/ap
 import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
+import { withVersion } from "./frameworks.js";
 import { type Attrs, type Log, micros, newId, type Span, type Trace } from "./model.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, origin } from "./stack.js";
@@ -473,7 +474,7 @@ export class TracepanelProcessor implements SpanProcessor {
       "telemetry.sdk.language": "nodejs",
       "process.runtime.name": process.versions.bun ? "bun" : "node",
       "process.runtime.version": process.versions.bun ?? process.versions.node,
-      "tracepanel.framework": building.framework,
+      "tracepanel.framework": withVersion(building.framework),
       // The W3C ids: the agent links this trace to the one that called it, in another app or process.
       "w3c.trace_id": root.spanContext().traceId,
     };
@@ -522,8 +523,9 @@ function requestKey(method: unknown, target: unknown): string {
 /** `Node 26 · Express`: what the panel shows next to its logo. */
 export function runtimeLabel(framework: string): string {
   const bun = process.versions.bun;
-  if (bun) return `Bun ${bun.split(".").slice(0, 2).join(".")} · ${framework}`;
-  return `Node ${process.versions.node.split(".")[0]} · ${framework}`;
+  const named = withVersion(framework, 2);
+  if (bun) return `Bun ${bun.split(".").slice(0, 2).join(".")} · ${named}`;
+  return `Node ${process.versions.node.split(".")[0]} · ${named}`;
 }
 
 export { micros };
