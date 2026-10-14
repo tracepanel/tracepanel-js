@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, request, type ServerResponse } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Starter } from "./agent.js";
 
 export interface TracepanelViteOptions {
   /** The backend project's directory, where its .tracepanel/ is. By default Vite's root and the folders above it. */
@@ -69,14 +70,26 @@ function consoleAddress(options: TracepanelViteOptions, root: string): string | 
   return undefined;
 }
 
-/** The request, sent on to the console as it came, and its answer back. */
 /** A client on this machine: the console's traces, and what it lets a local caller do, are for its developer only. */
 function isLocal(req: IncomingMessage): boolean {
   const address = req.socket.remoteAddress ?? "";
   return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
 }
 
-function forward(target: URL, req: IncomingMessage, res: ServerResponse): void {
+/**
+ * Where the backend project keeps its store, for an agent the plugin starts itself: its `dir`, else Vite's root. None
+ * when the console is given (a backend that serves its own, as Django does, starts its agent itself).
+ */
+function storeDir(options: TracepanelViteOptions, root: string): string | undefined {
+  if (options.console ?? process.env.TRACEPANEL_CONSOLE) return undefined;
+  return resolve(root, options.dir ?? ".", process.env.TRACEPANEL_DIR ?? ".tracepanel");
+}
+
+/**
+ * The request, sent on to the console as it came, and its answer back. A GET the agent doesn't answer (its address
+ * left over from one that exited) goes once more to what `restart` gives: a new agent's console.
+ */
+function forward(target: URL, req: IncomingMessage, res: ServerResponse, restart?: () => string | undefined): void {
   const upstream = request(
     {
       host: target.hostname,
@@ -91,6 +104,11 @@ function forward(target: URL, req: IncomingMessage, res: ServerResponse): void {
     },
   );
   upstream.on("error", () => {
+    const again = req.method === "GET" ? restart?.() : undefined;
+    if (again) {
+      forward(new URL(again), req, res);
+      return;
+    }
     res.writeHead(502, { "Content-Type": "text/plain" });
     res.end("Tracepanel's agent doesn't answer: is the backend running in development?");
   });
@@ -101,6 +119,14 @@ function forward(target: URL, req: IncomingMessage, res: ServerResponse): void {
 const VITE_SOURCES = ["/@vite/", "/@react-refresh"];
 
 export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
+  let starter: Starter | undefined;
+  /** The project's agent, started as the SDKs start it (`gone`: the one at its address didn't answer); its console. */
+  const started = (root: string, gone: boolean): string | undefined => {
+    const store = storeDir(options, root);
+    if (!store) return undefined;
+    starter ??= new Starter(store);
+    return starter.ensure(gone) ? consoleAddress(options, root) : undefined;
+  };
   return {
     name: "tracepanel",
     apply: "serve",
@@ -116,13 +142,15 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
           res.end(readFileSync(BROWSER));
           return;
         }
-        const address = consoleAddress(options, server.config.root);
+        const root = server.config.root;
+        // No agent yet (the backend starts it on its first request): the page's first load starts it here instead.
+        const address = consoleAddress(options, root) ?? started(root, false);
         if (!address) {
           res.writeHead(503, { "Content-Type": "text/plain" });
           res.end("No Tracepanel console yet: start the backend in development, or set the plugin's console.");
           return;
         }
-        forward(new URL(address), req, res);
+        forward(new URL(address), req, res, () => started(root, true));
       });
     },
     transformIndexHtml() {
