@@ -3,6 +3,7 @@
 
 import { ServerResponse } from "node:http";
 import type { Runtime } from "./runtime.js";
+import { exposedHeaders } from "./widget.js";
 
 const PATCHED = Symbol.for("tracepanel.headers");
 
@@ -23,6 +24,23 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
       });
       for (const [name, value] of Object.entries(marks?.headers ?? {})) {
         if (!this.hasHeader(name)) this.setHeader(name, value);
+      }
+      // Headers passed to writeHead itself (an object) count too: CORS middleware often sets them there.
+      const given = [args[1], args[2]].find((arg) => arg !== null && typeof arg === "object" && !Array.isArray(arg));
+      const passed = (given ?? {}) as Record<string, unknown>;
+      const lower = Object.fromEntries(
+        Object.entries(passed ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+      );
+      const expose = marks
+        ? exposedHeaders(
+            this.getHeader("access-control-allow-origin") ?? lower["access-control-allow-origin"],
+            this.getHeader("access-control-expose-headers") ?? lower["access-control-expose-headers"],
+          )
+        : undefined;
+      if (expose) {
+        this.setHeader("Access-Control-Expose-Headers", expose);
+        delete (passed as Record<string, unknown>)["access-control-expose-headers"];
+        delete (passed as Record<string, unknown>)["Access-Control-Expose-Headers"];
       }
     }
     return (writeHead as (...params: unknown[]) => ServerResponse).apply(this, args);

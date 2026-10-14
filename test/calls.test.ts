@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { httpCall, mongoCall, redisCall, safeUrl } from "../src/calls.js";
+import { exposedHeaders } from "../src/widget.js";
 
 describe("calls to other systems", () => {
   it("keeps no credentials or secret values in a URL", () => {
@@ -64,5 +65,17 @@ describe("calls to other systems", () => {
 
     expect(find(1).attrs["db.params_hash"]).toBe(find(1).attrs["db.params_hash"]);
     expect(find(1).attrs["db.params_hash"]).not.toBe(find(2).attrs["db.params_hash"]);
+  });
+});
+
+describe("headers for other origins", () => {
+  it("adds the trace's headers to a CORS response's exposed ones", () => {
+    expect(exposedHeaders("http://localhost:5173", "X-Total")).toBe(
+      "X-Total, Tracepanel-Id, Tracepanel-Name, Tracepanel-Url, Server-Timing",
+    );
+  });
+
+  it("leaves a response that isn't CORS alone", () => {
+    expect(exposedHeaders(undefined, undefined)).toBeUndefined();
   });
 });

@@ -9,7 +9,7 @@
 import { SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
-import { inject } from "./widget.js";
+import { exposedHeaders, inject } from "./widget.js";
 
 type Handler = (request: Request, server?: unknown) => Response | Promise<Response>;
 type ErrorHandler = (error: Error) => Response | Promise<Response>;
@@ -75,6 +75,11 @@ async function marked(tracepanel: Runtime, request: Request, response: Response,
   if (!marks) return response;
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(marks.headers)) headers.set(name, value);
+  const expose = exposedHeaders(
+    headers.get("access-control-allow-origin") ?? undefined,
+    headers.get("access-control-expose-headers"),
+  );
+  if (expose) headers.set("Access-Control-Expose-Headers", expose);
   if (!marks.script) return new Response(response.body, { status: response.status, headers });
   headers.delete("content-length");
   const body = inject(await response.text(), marks.script);

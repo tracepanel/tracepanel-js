@@ -3,7 +3,7 @@
 
 import type { NextFunction, Request, Response } from "express";
 import { runtime } from "./runtime.js";
-import { badge, inject } from "./widget.js";
+import { badge, exposedHeaders, inject } from "./widget.js";
 
 type Write = Response["write"];
 type End = Response["end"];
@@ -63,6 +63,11 @@ export function tracepanel() {
       const marks = badge(tp, { method: req.method, status: res.statusCode, startedMs, page, framework });
       if (marks) {
         for (const [name, value] of Object.entries(marks.headers)) res.setHeader(name, value);
+        const expose = exposedHeaders(
+          res.getHeader("access-control-allow-origin"),
+          res.getHeader("access-control-expose-headers"),
+        );
+        if (expose) res.setHeader("Access-Control-Expose-Headers", expose);
         if (marks.script) body = Buffer.from(inject(body.toString("utf8"), marks.script));
       }
       if (!res.getHeader("transfer-encoding")) res.setHeader("Content-Length", body.length);

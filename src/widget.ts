@@ -69,6 +69,21 @@ export function badge(tracepanel: Runtime, request: BadgeRequest): Badge | undef
   return { headers, script, scriptAttrs };
 }
 
+const EXPOSED = ["Tracepanel-Id", "Tracepanel-Name", "Tracepanel-Url", "Server-Timing"];
+
+/**
+ * Access-Control-Expose-Headers with Tracepanel's added, for a CORS response (one with Access-Control-Allow-Origin):
+ * a page on another origin, an SPA on Vite's dev server, can read the trace's id then. Undefined for other responses.
+ */
+export function exposedHeaders(allowOrigin: unknown, existing: unknown): string | undefined {
+  if (allowOrigin === undefined || allowOrigin === null) return undefined;
+  const names = String(existing ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return [...new Set([...names, ...EXPOSED])].join(", ");
+}
+
 /** The tag first in <head>, so the widget wraps fetch before the page's scripts keep a reference to it. */
 export function inject(page: string, tag: string): string {
   const head = /<head[^>]*>/i.exec(page);
