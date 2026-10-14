@@ -396,7 +396,8 @@ export class TracepanelProcessor implements SpanProcessor {
       const call = httpCall(attrs);
       converted.kind = "http.client";
       converted.name = call.name;
-      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
+      // The traceparent the call carried names this span: the agent links the callee's trace to it.
+      converted.attrs = { ...call.attrs, "w3c.span_id": context.spanId, "code.origin": codeOrigin };
     } else {
       converted.attrs = { ...attrs, "code.origin": codeOrigin };
     }

@@ -11,12 +11,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, request, type ServerResponse } from "node:http";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface TracepanelViteOptions {
   /** The backend project's directory, where its .tracepanel/ is. By default Vite's root and the folders above it. */
   dir?: string;
   /** The console's address itself, such as http://127.0.0.1:8765/ (`tracepanel dev`). TRACEPANEL_CONSOLE too. */
   console?: string;
+  /**
+   * Record the pages in the browser too (tracepanel/browser): each view, its calls with a traceparent to the
+   * backend's traces, its errors and its console. On unless false; `{ service, propagateTo }` sets its options.
+   */
+  browser?: false | { service?: string; propagateTo?: string[] };
 }
 
 interface ViteServer {
@@ -30,10 +36,17 @@ interface Plugin {
   name: string;
   apply: "serve";
   configureServer(server: ViteServer): void;
-  transformIndexHtml(): { tag: string; attrs: Record<string, string | boolean>; injectTo: "head-prepend" }[];
+  transformIndexHtml(): {
+    tag: string;
+    attrs: Record<string, string | boolean>;
+    children?: string;
+    injectTo: "head-prepend";
+  }[];
 }
 
 const PREFIX = "/__tracepanel__/";
+// The browser recording, served from this package by the plugin itself: the console doesn't have it.
+const BROWSER = fileURLToPath(new URL("./browser.js", import.meta.url));
 
 /** The console's address: given, or what the project's agent wrote in .tracepanel/console.addr. */
 function consoleAddress(options: TracepanelViteOptions, root: string): string | undefined {
@@ -81,6 +94,11 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use(PREFIX, (req, res) => {
+        if (req.url === "/browser.js") {
+          res.writeHead(200, { "Content-Type": "text/javascript", "Cache-Control": "no-store" });
+          res.end(readFileSync(BROWSER));
+          return;
+        }
         const address = consoleAddress(options, server.config.root);
         if (!address) {
           res.writeHead(503, { "Content-Type": "text/plain" });
@@ -91,13 +109,20 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
       });
     },
     transformIndexHtml() {
-      return [
-        {
-          tag: "script",
-          attrs: { src: `${PREFIX}widget.min.js`, "data-tracepanel-api": PREFIX, defer: true },
-          injectTo: "head-prepend",
-        },
-      ];
+      const widget = {
+        tag: "script",
+        attrs: { src: `${PREFIX}widget.min.js`, "data-tracepanel-api": PREFIX, defer: true },
+        injectTo: "head-prepend" as const,
+      };
+      if (options.browser === false) return [widget];
+      const settings = JSON.stringify({ api: PREFIX, ...options.browser });
+      const recording = {
+        tag: "script",
+        attrs: { type: "module" },
+        children: `import { record } from "${PREFIX}browser.js"; record(${settings});`,
+        injectTo: "head-prepend" as const,
+      };
+      return [recording, widget];
     },
   };
 }

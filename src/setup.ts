@@ -93,7 +93,12 @@ export function start(options: Options = {}): Runtime | undefined {
     // fetch(): Node's own, through undici.
     new UndiciInstrumentation(),
     // Outgoing calls through node:http (axios, got) always; the server's requests unless the framework traces them.
-    new HttpInstrumentation(options.httpServer === false ? { ignoreIncomingRequestHook: () => true } : {}),
+    new HttpInstrumentation({
+      // A CORS preflight (the browser asking before a call with a traceparent) is the browser's, not the app's work.
+      ignoreIncomingRequestHook: (request) =>
+        options.httpServer === false ||
+        (request.method === "OPTIONS" && request.headers["access-control-request-method"] !== undefined),
+    }),
   ];
   registerInstrumentations({ instrumentations });
   captureConsole(tracepanel.processor);

@@ -152,6 +152,19 @@ export default { plugins: [tracepanel({ dir: "../backend" })] };
 An API on another origin exposes the trace's headers to the page on its CORS
 responses, so the badge lists each call the app makes.
 
+The plugin also records the pages in the browser: each view and each burst
+of activity after it is a trace of its own, in the console's Pages, with the
+page's calls to its API, its errors and its console. A call to the page's own
+origin carries a W3C `traceparent`, so the console links it to the API's
+trace; `propagateTo` names other origins (their CORS must allow the header):
+
+```ts
+tracepanel({ dir: "../backend", browser: { service: "shop-web", propagateTo: ["http://127.0.0.1:8000"] } });
+```
+
+Without Vite, call `record()` from `tracepanel/browser` in the page, with the
+console on the page's origin (`api`, `/__tracepanel__/` by default).
+
 ## What it records
 
 - HTTP requests, with the route and the handler that served them.
