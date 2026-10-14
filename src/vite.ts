@@ -7,6 +7,9 @@
 // index.html gets widget.min.js, and /__tracepanel__/ on Vite's own origin goes to the console of the backend
 // project's agent, so the widget and its console share the page's origin. The API's responses carry their trace's
 // id; across origins they expose it to the page (the SDKs do that for CORS responses).
+//
+// Only this machine reaches the console here, whatever address Vite listens on (`vite --host` for a phone): the
+// backend sees the proxy's own address, so its own local-only checks (switching the user) would let anyone through.
 
 import { existsSync, readFileSync } from "node:fs";
 import { type IncomingMessage, request, type ServerResponse } from "node:http";
@@ -67,6 +70,12 @@ function consoleAddress(options: TracepanelViteOptions, root: string): string | 
 }
 
 /** The request, sent on to the console as it came, and its answer back. */
+/** A client on this machine: the console's traces, and what it lets a local caller do, are for its developer only. */
+function isLocal(req: IncomingMessage): boolean {
+  const address = req.socket.remoteAddress ?? "";
+  return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+}
+
 function forward(target: URL, req: IncomingMessage, res: ServerResponse): void {
   const upstream = request(
     {
@@ -97,6 +106,11 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use(PREFIX, (req, res) => {
+        if (!isLocal(req)) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("The Tracepanel console answers on this machine only.");
+          return;
+        }
         if (req.url === "/browser.js") {
           res.writeHead(200, { "Content-Type": "text/javascript", "Cache-Control": "no-store" });
           res.end(readFileSync(BROWSER));
