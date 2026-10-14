@@ -1,7 +1,7 @@
 // OpenTelemetry for the app, with Tracepanel's span processor: what `tracepanel/register` sets up before the app,
 // and what a framework that starts its own server (Next.js) sets up from its instrumentation hook.
 
-import { createRequire, register } from "node:module";
+import nodeModule, { createRequire, register } from "node:module";
 import { join } from "node:path";
 import { isMainThread } from "node:worker_threads";
 import { type Instrumentation, registerInstrumentations } from "@opentelemetry/instrumentation";
@@ -73,8 +73,9 @@ export function start(options: Options = {}): Runtime | undefined {
   const holder = globalThis as { [STARTED]?: boolean };
   if (!tracepanel || holder[STARTED] || nuxtDevProxy()) return tracepanel;
   holder[STARTED] = true;
-  // The ESM loader hook, in the app's thread where Node can (module.register() is deprecated from Node 26).
-  if (supportsSyncHooks()) registerSyncHooks();
+  // The ESM loader hook, in the app's thread where Node can (module.register() is deprecated from Node 26). Bun 1.4
+  // says it is Node 26 but has no registerHooks(): supportsSyncHooks() goes by the version only.
+  if (supportsSyncHooks() && typeof nodeModule.registerHooks === "function") registerSyncHooks();
   else register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
   new NodeTracerProvider({ spanProcessors: [tracepanel.processor] }).register();
   const instrumentations: Instrumentation[] = [
