@@ -88,6 +88,9 @@ function forward(target: URL, req: IncomingMessage, res: ServerResponse): void {
   req.pipe(upstream);
 }
 
+// Scripts Vite serves for itself: its client and env (/@vite/), React's refresh runtime (/@react-refresh).
+const VITE_SOURCES = ["/@vite/", "/@react-refresh"];
+
 export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
   return {
     name: "tracepanel",
@@ -115,7 +118,8 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
         injectTo: "head-prepend" as const,
       };
       if (options.browser === false) return [widget];
-      const settings = JSON.stringify({ api: PREFIX, ...options.browser });
+      // The dev server's own client logs (HMR, its connection) aren't the page's: by where they come from.
+      const settings = JSON.stringify({ api: PREFIX, ignoreSources: VITE_SOURCES, ...options.browser });
       const recording = {
         tag: "script",
         attrs: { type: "module" },

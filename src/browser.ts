@@ -21,6 +21,11 @@ export interface BrowserOptions {
   service?: string;
   /** Other origins whose calls carry a traceparent (their CORS must allow the header). */
   propagateTo?: string[];
+  /**
+   * Scripts whose console isn't the page's, by path prefix: a dev server's own client ("/@vite/"). tracepanel/vite
+   * sets Vite's; a library's warnings still count (React's, from /node_modules/).
+   */
+  ignoreSources?: string[];
 }
 
 type Attrs = Record<string, unknown>;
@@ -198,15 +203,42 @@ function formName(form: HTMLFormElement): string {
   return action ? action.pathname : "form";
 }
 
+/** Where a console call came from: the first frame of the stack that isn't this script's own. */
+function caller(stack: string | undefined, own: string | undefined): Frame | undefined {
+  return frames(stack)
+    .reverse()
+    .find((frame) => frame.filename !== own);
+}
+
+/** Where a console call was made, as the other SDKs say it: the file and line, and the function when it has a name. */
+function whereLogged(frame: Frame): Attrs {
+  const named = frame.function !== "<anonymous>" ? { "code.function": frame.function } : {};
+  return { "code.filepath": frame.filename, "code.lineno": frame.lineno, ...named };
+}
+
 /** A browser stack's frames, oldest first: the page's own scripts are the app's. */
-function frames(stack: string | undefined): Attrs[] {
-  const found: Attrs[] = [];
+/** A stack frame as the agent stores an error's. */
+interface Frame {
+  filename: string;
+  module: string;
+  function: string;
+  lineno: number;
+  in_app: boolean;
+  context_start: null;
+  context: string[];
+  locals: Attrs;
+}
+
+function frames(stack: string | undefined): Frame[] {
+  const found: Frame[] = [];
   for (const line of (stack ?? "").split("\n")) {
     const match = /^\s*at (?:(.+?) \()?(.+?):(\d+):\d+\)?$/.exec(line) ?? /^(.*?)@(.+?):(\d+):\d+$/.exec(line);
     if (!match) continue;
-    const url = safeUrl(match[2] ?? "");
+    // A script's URL; code with no file of its own (eval, a console) is named as the browser names it: <anonymous>.
+    const raw = match[2] ?? "";
+    const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? safeUrl(raw) : undefined;
     found.push({
-      filename: url ? url.pathname : (match[2] ?? ""),
+      filename: url ? url.pathname : raw,
       module: "",
       function: match[1] || "<anonymous>",
       lineno: Number(match[3]),
@@ -226,6 +258,9 @@ export function record(options: BrowserOptions = {}): void {
   const api = new URL(options.api ?? "/__tracepanel__/", location.href).toString();
   const propagate = new Set([location.origin, ...(options.propagateTo ?? [])]);
   const send = window.fetch.bind(window);
+  const ignored = options.ignoreSources ?? [];
+  // This script's own path, to tell a console call's caller from the wrapper it went through.
+  const own = frames(new Error().stack).at(-1)?.filename;
   let view: View | undefined;
   let interaction: Interaction | undefined;
 
@@ -461,7 +496,9 @@ export function record(options: BrowserOptions = {}): void {
     if (!original) continue;
     (console as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
       const current = view;
-      if (current) {
+      const from = current ? caller(new Error().stack, own) : undefined;
+      const source = from?.filename ?? "";
+      if (current && !ignored.some((prefix) => source.startsWith(prefix))) {
         current.trace.logs.push({
           span_id: null,
           time: nowUs(),
@@ -469,7 +506,7 @@ export function record(options: BrowserOptions = {}): void {
           logger: "console",
           message: args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "),
           exception: args.find((arg): arg is Error => arg instanceof Error)?.stack ?? null,
-          attrs: {},
+          attrs: from ? whereLogged(from) : {},
         });
       }
       original.apply(console, args);
