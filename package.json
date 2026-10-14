@@ -32,6 +32,10 @@
     "./nuxt": {
       "types": "./dist/nuxt.d.ts",
       "default": "./dist/nuxt.js"
+    },
+    "./bun": {
+      "types": "./dist/bun.d.ts",
+      "default": "./dist/bun.js"
     }
   },
   "bin": {

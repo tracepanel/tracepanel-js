@@ -427,8 +427,8 @@ export class TracepanelProcessor implements SpanProcessor {
       "service.name": this.config.service,
       "service.role": "web",
       "telemetry.sdk.language": "nodejs",
-      "process.runtime.name": "node",
-      "process.runtime.version": process.versions.node,
+      "process.runtime.name": process.versions.bun ? "bun" : "node",
+      "process.runtime.version": process.versions.bun ?? process.versions.node,
       "tracepanel.framework": building.framework,
       // The W3C ids: the agent links this trace to the one that called it, in another app or process.
       "w3c.trace_id": root.spanContext().traceId,
@@ -451,6 +451,8 @@ function requestKey(method: unknown, target: unknown): string {
 
 /** `Node 26 · Express`: what the panel shows next to its logo. */
 export function runtimeLabel(framework: string): string {
+  const bun = process.versions.bun;
+  if (bun) return `Bun ${bun.split(".").slice(0, 2).join(".")} · ${framework}`;
   return `Node ${process.versions.node.split(".")[0]} · ${framework}`;
 }
 
