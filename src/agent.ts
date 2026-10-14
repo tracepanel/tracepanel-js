@@ -3,7 +3,7 @@
 // array of traces. The agent starts on demand, as the other SDKs start it, and outlives the app's restarts.
 
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
@@ -18,6 +18,9 @@ const RETRY_AFTER_MS = 5000;
 const START_WAIT_MS = 1500;
 const CONSOLE_CHECK_MS = 2000;
 const IDLE_EXIT_S = "1800";
+// An agent that exited (idle, killed, replaced by a new build) is started anew at once; one that couldn't start is
+// tried again after this long, not on every trace.
+const RESTART_MS = 30_000;
 
 function readAddress(path: string): string {
   try {
@@ -54,19 +57,25 @@ function warn(message: string): void {
   process.stderr.write(`tracepanel: ${message}\n`);
 }
 
-/** Starts the project's agent at most once per process, in its own session, serving the console on a free port. */
+/** Starts the project's agent when none answers, in its own session, serving the console on a free port. */
 export class Starter {
-  private tried = false;
+  private failedAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly storeDir: string) {}
 
-  /** Whether an agent runs for the project: one already does, or this process starts it (once). */
-  ensure(): boolean {
-    if (agentAddress(this.storeDir)) return true;
-    if (!autoStart() || this.tried) return false;
-    this.tried = true;
+  /**
+   * Whether an agent runs for the project: one already does, or this process starts it (RESTART_MS after a failure).
+   * `gone`: the agent at the project's address didn't answer. One that didn't exit cleanly (killed, a reboot) leaves
+   * its addresses: they go before a new one starts.
+   */
+  ensure(gone = false): boolean {
+    if (!gone && agentAddress(this.storeDir)) return true;
+    if (!autoStart() || Date.now() - this.failedAt < RESTART_MS) return false;
+    if (gone) for (const name of ["agent.addr", "console.addr"]) rmSync(join(this.storeDir, name), { force: true });
     this.start();
-    return agentAddress(this.storeDir) !== "";
+    const started = agentAddress(this.storeDir) !== "";
+    if (!started) this.failedAt = Date.now();
+    return started;
   }
 
   private start(): void {
@@ -173,7 +182,7 @@ export class Sender {
 
   private async open(): Promise<Socket | undefined> {
     let socket = await this.handshake(agentAddress(this.config.storeDir));
-    if (!socket && this.starter.ensure()) socket = await this.handshake(agentAddress(this.config.storeDir));
+    if (!socket && this.starter.ensure(true)) socket = await this.handshake(agentAddress(this.config.storeDir));
     if (socket) {
       this.socket = socket;
       socket.unref();
