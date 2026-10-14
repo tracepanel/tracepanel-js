@@ -3,6 +3,7 @@
 
 import { createRequire, register } from "node:module";
 import { join } from "node:path";
+import { isMainThread } from "node:worker_threads";
 import { type Instrumentation, registerInstrumentations } from "@opentelemetry/instrumentation";
 import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
@@ -10,7 +11,8 @@ import { MySQL2Instrumentation } from "@opentelemetry/instrumentation-mysql2";
 import { NestInstrumentation } from "@opentelemetry/instrumentation-nestjs-core";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { captureConsole, NestLogs } from "./logs.js";
+import { captureConsole } from "./console.js";
+import { NestLogs } from "./logs.js";
 import { type Runtime, runtime } from "./runtime.js";
 
 export interface Options {
@@ -49,11 +51,20 @@ function nest(): NestInstrumentation {
   return instrumentation;
 }
 
+/**
+ * `nuxt dev`'s main thread: it only builds and proxies each request to Nitro's worker thread, which serves it (and
+ * gets the same --import). Tracing it would make a second, empty trace of every request.
+ */
+function nuxtDevProxy(): boolean {
+  const script = process.argv[1] ?? "";
+  return isMainThread && /[\\/]nuxi?(\.m?js)?$|[\\/]nuxt[\\/]bin[\\/]/.test(script) && process.argv.includes("dev");
+}
+
 /** Sets up tracing once per process; undefined when Tracepanel is off (production). */
 export function start(options: Options = {}): Runtime | undefined {
   const tracepanel = runtime();
   const holder = globalThis as { [STARTED]?: boolean };
-  if (!tracepanel || holder[STARTED]) return tracepanel;
+  if (!tracepanel || holder[STARTED] || nuxtDevProxy()) return tracepanel;
   holder[STARTED] = true;
   register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
   new NodeTracerProvider({ spanProcessors: [tracepanel.processor] }).register();

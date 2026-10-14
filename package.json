@@ -28,6 +28,10 @@
     "./next/widget": {
       "types": "./dist/next-widget.d.ts",
       "default": "./dist/next-widget.js"
+    },
+    "./nuxt": {
+      "types": "./dist/nuxt.d.ts",
+      "default": "./dist/nuxt.js"
     }
   },
   "bin": {

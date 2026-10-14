@@ -25,6 +25,10 @@ interface Building {
   framework: string;
   /** performance.now() as the request's root span started. */
   startedMs: number;
+  /** OTel span id of the request's root span here: its parent, if any, is in another process. */
+  rootSpanId: string;
+  /** The route pattern a framework named (Nitro's /api/books/:id), for a root span that has none. */
+  route: string | null;
   /** The request as its root span started: method and target, to find it from a response sent outside its context. */
   request: string;
   /** Whether a response's headers have taken this trace's id already. */
@@ -126,12 +130,15 @@ export class TracepanelProcessor implements SpanProcessor {
     const context = span.spanContext();
     const parent = span.parentSpanContext;
     let building = this.open.get(context.traceId);
-    if (!parent) {
+    // A request that came from another process (with its traceparent) starts this process's trace all the same.
+    const local = !parent || (parent.isRemote === true && span.kind === SpanKind.SERVER && !building);
+    if (local) {
       // Work outside a request (a script, a job) isn't traced yet.
       if (span.kind !== SpanKind.SERVER) return;
       if (NEXT_INTERNAL.test(String(first(attrsOf(span), "http.target", "url.path") ?? ""))) return;
       this.dropAbandoned();
       building = this.start();
+      building.rootSpanId = context.spanId;
       const rootAttrs = attrsOf(span);
       building.request = requestKey(
         first(rootAttrs, "http.request.method", "http.method"),
@@ -142,7 +149,7 @@ export class TracepanelProcessor implements SpanProcessor {
     if (!building) return;
     const found = origin(this.config.root);
     if (found) building.lastOrigin = found;
-    if (parent && skipped(span)) {
+    if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
       return;
     }
@@ -154,7 +161,7 @@ export class TracepanelProcessor implements SpanProcessor {
       building.ids.set(parent.spanId, building.parents.get(parent.spanId) ?? null);
       building.framework = "NestJS";
     }
-    building.parents.set(context.spanId, parent ? (building.ids.get(parent.spanId) ?? null) : null);
+    building.parents.set(context.spanId, parent && !local ? (building.ids.get(parent.spanId) ?? null) : null);
     if (!parent && attrs["next.span_type"] === "BaseServer.handleRequest") building.framework = "Next.js";
     building.ids.set(context.spanId, newId());
     building.origins.set(context.spanId, found ?? building.lastOrigin);
@@ -169,7 +176,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const context = span.spanContext();
     const building = this.open.get(context.traceId);
     if (!building) return;
-    const root = !span.parentSpanContext;
+    const root = context.spanId === building.rootSpanId;
     if (building.replaced.has(context.spanId)) return;
     if (root || !skipped(span)) this.convert(building, span, root);
     if (!root) return;
@@ -231,6 +238,24 @@ export class TracepanelProcessor implements SpanProcessor {
     return found;
   }
 
+  /** An error a framework caught and answered with a 500 itself, without recording it on a span (Nitro). */
+  addError(error: unknown): void {
+    const current = this.current();
+    if (!current) return;
+    const thrown = error instanceof Error ? error : new Error(String(error));
+    // h3 wraps what the handler threw: the cause is the app's error.
+    const cause = thrown.cause instanceof Error ? thrown.cause : thrown;
+    current.building.trace.errors.push({
+      span_id: current.spanId,
+      time: Date.now() * 1000,
+      type: cause.name || "Error",
+      message: cause.message,
+      handled: false,
+      frames: frames(cause.stack ?? "", this.config.root),
+      chain: [],
+    });
+  }
+
   addLog(log: Omit<Log, "span_id">): void {
     const current = this.current();
     current?.building.trace.logs.push({ ...log, span_id: current.spanId });
@@ -240,6 +265,12 @@ export class TracepanelProcessor implements SpanProcessor {
   setFramework(name: string): void {
     const current = this.current();
     if (current && current.building.framework === "node:http") current.building.framework = name;
+  }
+
+  /** The route pattern the framework matched, when the root span doesn't carry one (Nitro). */
+  setRoute(route: string): void {
+    const current = this.current();
+    if (current) current.building.route = route;
   }
 
   /** The framework the active request ran on, as the panel shows it. */
@@ -269,6 +300,8 @@ export class TracepanelProcessor implements SpanProcessor {
       dbTime: 0,
       framework: "node:http",
       startedMs: performance.now(),
+      rootSpanId: "",
+      route: null,
       request: "",
       answered: false,
       replaced: new Set(),
@@ -372,7 +405,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const attrs = attrsOf(root);
     const method = String(first(attrs, "http.request.method", "http.method") ?? "GET");
     const path = String(first(attrs, "url.path", "http.target") ?? "/").split("?")[0];
-    const route = first(attrs, "http.route", "next.route");
+    const route = first(attrs, "http.route", "next.route") ?? building.route;
     const status = Number(first(attrs, "http.response.status_code", "http.status_code") ?? 0);
     const tr = building.trace;
     if (status > 0 && status < 500) {
@@ -397,7 +430,10 @@ export class TracepanelProcessor implements SpanProcessor {
       "process.runtime.name": "node",
       "process.runtime.version": process.versions.node,
       "tracepanel.framework": building.framework,
+      // The W3C ids: the agent links this trace to the one that called it, in another app or process.
+      "w3c.trace_id": root.spanContext().traceId,
     };
+    if (root.parentSpanContext?.isRemote) tr.attrs["w3c.parent_span_id"] = root.parentSpanContext.spanId;
   }
 }
 
