@@ -1,5 +1,9 @@
 # Tracepanel for Node.js and Bun
 
+[![CI](https://github.com/tracepanel/tracepanel-js/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tracepanel/tracepanel-js/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/tracepanel)](https://www.npmjs.com/package/tracepanel)
+[![Node.js](https://img.shields.io/node/v/tracepanel)](https://www.npmjs.com/package/tracepanel)
+
 **See what your app does on every request.** Tracepanel records each request
 of your Express, NestJS, Next.js, Nuxt or Bun app with its SQL queries, logs
 and errors. It finds N+1 queries, duplicate queries and slow SQL, and names
