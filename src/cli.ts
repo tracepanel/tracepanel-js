@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { loadConfig } from "./config.js";
 
 const HELP = `usage: tracepanel <command>
-  run <command...>   run a Node command with Tracepanel on (node --import tracepanel/register)
+  run <command...>   run a Node command with Tracepanel on (node --import @tracepanel/js/register)
   dev [--port 8765]  run the agent in the foreground, with the console on http://127.0.0.1:8765/
   mcp [--values]     an MCP server for AI coding agents, on stdin and stdout`;
 

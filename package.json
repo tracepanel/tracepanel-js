@@ -1,5 +1,5 @@
 {
-  "name": "tracepanel",
+  "name": "@tracepanel/js",
   "version": "0.2.0",
   "description": "Traces and logs for Node.js and Bun apps (Express, NestJS, Next.js, Nuxt, Bun.serve): every request with its SQL, logs and errors, N+1 queries found",
   "license": "MIT",

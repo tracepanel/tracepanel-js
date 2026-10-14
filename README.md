@@ -1,8 +1,8 @@
 # Tracepanel for Node.js and Bun
 
 [![CI](https://github.com/tracepanel/tracepanel-js/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tracepanel/tracepanel-js/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/tracepanel)](https://www.npmjs.com/package/tracepanel)
-[![Node.js](https://img.shields.io/node/v/tracepanel)](https://www.npmjs.com/package/tracepanel)
+[![npm](https://img.shields.io/npm/v/@tracepanel/js)](https://www.npmjs.com/package/@tracepanel/js)
+[![Node.js](https://img.shields.io/node/v/@tracepanel/js)](https://www.npmjs.com/package/@tracepanel/js)
 
 **See what your app does on every request.** Tracepanel records each request
 of your Express, NestJS, Next.js, Nuxt or Bun app with its SQL queries, logs
@@ -15,7 +15,7 @@ It runs while you develop, and everything stays on your machine.
 ## Setup
 
 ```bash
-npm install tracepanel
+npm install @tracepanel/js
 ```
 
 Tracepanel is on unless `NODE_ENV` is `production`. `TRACEPANEL_ENABLED=0`
@@ -32,19 +32,19 @@ middleware. It puts the badge on HTML pages and gives every response its
 trace id:
 
 ```bash
-node --import tracepanel/register server.js
+node --import @tracepanel/js/register server.js
 ```
 
 ```js
 import express from "express";
-import { tracepanel } from "tracepanel/express";
+import { tracepanel } from "@tracepanel/js/express";
 
 const app = express();
 app.use(tracepanel());
 ```
 
 The flag is how Tracepanel gets in before the app. An ES module's imports
-all load before any of its code runs, so `import "tracepanel/register"` at
+all load before any of its code runs, so `import "@tracepanel/js/register"` at
 the top of `server.js` comes too late for Express and the database driver.
 Without the flag, either let the CLI add it:
 
@@ -56,7 +56,7 @@ or start from a file that loads Tracepanel, then the app:
 
 ```js
 // main.js, run with `node main.js`
-import "tracepanel/register";
+import "@tracepanel/js/register";
 await import("./server.js");
 ```
 
@@ -71,12 +71,12 @@ request's trace. An `HttpException` that answers below 500 is the response,
 not an error.
 
 ```bash
-node --import tracepanel/register dist/main.js
+node --import @tracepanel/js/register dist/main.js
 ```
 
 ```ts
 import { NestFactory } from "@nestjs/core";
-import { tracepanel } from "tracepanel/express";
+import { tracepanel } from "@tracepanel/js/express";
 import { AppModule } from "./app.module.js";
 
 const app = await NestFactory.create(AppModule);
@@ -93,19 +93,19 @@ of the bundles, and put the badge in the root layout:
 ```ts
 // instrumentation.ts
 export async function register() {
-  if (process.env.NEXT_RUNTIME === "nodejs") (await import("tracepanel/next")).register();
+  if (process.env.NEXT_RUNTIME === "nodejs") (await import("@tracepanel/js/next")).register();
 }
 ```
 
 ```ts
 // next.config.ts
-const config = { serverExternalPackages: ["tracepanel"] };
+const config = { serverExternalPackages: ["@tracepanel/js"] };
 export default config;
 ```
 
 ```tsx
 // app/layout.tsx
-import { Tracepanel } from "tracepanel/next/widget";
+import { Tracepanel } from "@tracepanel/js/next/widget";
 
 export default function RootLayout({ children }) {
   return (
@@ -129,11 +129,11 @@ database driver as Nitro loads it:
 
 ```ts
 // nuxt.config.ts
-export default defineNuxtConfig({ modules: ["tracepanel/nuxt"] });
+export default defineNuxtConfig({ modules: ["@tracepanel/js/nuxt"] });
 ```
 
 ```bash
-NODE_OPTIONS=--import=tracepanel/register nuxt dev
+NODE_OPTIONS=--import=@tracepanel/js/register nuxt dev
 ```
 
 The module names each request by its route (`/api/books/:id`), puts the
@@ -145,11 +145,11 @@ badge on server-rendered pages, and records the errors h3 answers with a 500.
 `withTracepanel()` wraps any fetch handler, such as Hono's `app.fetch`:
 
 ```bash
-bun --preload tracepanel/register server.ts
+bun --preload @tracepanel/js/register server.ts
 ```
 
 ```ts
-import { serve } from "tracepanel/bun";
+import { serve } from "@tracepanel/js/bun";
 
 serve({
   routes: {
@@ -167,7 +167,7 @@ from the backend project's `.tracepanel/`:
 
 ```ts
 // vite.config.ts
-import { tracepanel } from "tracepanel/vite";
+import { tracepanel } from "@tracepanel/js/vite";
 
 export default { plugins: [tracepanel({ dir: "../backend" })] };
 ```
@@ -205,7 +205,7 @@ tracepanel({ dir: "../backend", browser: { service: "shop-web", propagateTo: ["h
 `browser: false` leaves the recording out. Vite's own client logs (its
 connection, hot reload) stay out of the pages' traces.
 
-Without Vite, call `record()` from `tracepanel/browser` in the page, with the
+Without Vite, call `record()` from `@tracepanel/js/browser` in the page, with the
 console on the page's origin (`api`, `/__tracepanel__/` by default).
 `ignoreSources` takes the path prefixes of scripts whose console isn't the
 page's, such as a dev server's client.
@@ -228,7 +228,7 @@ page's, such as a dev server's client.
 ## Your own steps and traces
 
 ```js
-import { span, trace } from "tracepanel";
+import { span, trace } from "@tracepanel/js";
 
 await trace("nightly cleanup", async () => {
   await span("load stale rows", () => loadStaleRows());

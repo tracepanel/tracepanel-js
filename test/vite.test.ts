@@ -1,4 +1,4 @@
-// tracepanel/vite: the widget and the browser recording in the page, and the backend's console on Vite's origin,
+// @tracepanel/js/vite: the widget and the browser recording in the page, and the backend's console on Vite's origin,
 // for this machine only, with the backend's agent started when none runs yet.
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";

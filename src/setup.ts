@@ -1,4 +1,4 @@
-// OpenTelemetry for the app, with Tracepanel's span processor: what `tracepanel/register` sets up before the app,
+// OpenTelemetry for the app, with Tracepanel's span processor: what `@tracepanel/js/register` sets up before the app,
 // and what a framework that starts its own server (Next.js) sets up from its instrumentation hook.
 
 import nodeModule, { createRequire, register } from "node:module";

@@ -1,4 +1,4 @@
-// The Nitro plugin tracepanel/nuxt adds in development. Nitro bundles it into the server: it reads the process's
+// The Nitro plugin @tracepanel/js/nuxt adds in development. Nitro bundles it into the server: it reads the process's
 // Tracepanel from globalThis and brings no OpenTelemetry of its own.
 
 import { captureConsole } from "./console.js";

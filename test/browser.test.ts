@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"url": "http://app.test/books"}
-// tracepanel/browser in a page: its load, what the user does, the calls each makes, its console, a route change.
+// @tracepanel/js/browser in a page: its load, what the user does, the calls each makes, its console, a route change.
 // One recording for the page, as in a browser: the tests follow one another on it.
 import { beforeAll, expect, test } from "vitest";
 import { record } from "../src/browser.js";

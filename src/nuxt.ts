@@ -1,6 +1,6 @@
-// `modules: ["tracepanel/nuxt"]` in nuxt.config: a Nitro plugin that names each request by its route, puts the badge
+// `modules: ["@tracepanel/js/nuxt"]` in nuxt.config: a Nitro plugin that names each request by its route, puts the badge
 // on server-rendered pages and the trace's id on every response. OpenTelemetry itself goes in before Nitro, with
-// `NODE_OPTIONS=--import=tracepanel/register nuxt dev`, so it can hook the database driver as Nitro loads it.
+// `NODE_OPTIONS=--import=@tracepanel/js/register nuxt dev`, so it can hook the database driver as Nitro loads it.
 
 import { fileURLToPath } from "node:url";
 
