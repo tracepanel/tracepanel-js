@@ -1,7 +1,7 @@
 {
   "name": "tracepanel",
   "version": "0.0.0",
-  "description": "Traces and logs for Node.js apps: every request with its SQL, logs and errors, N+1 queries found",
+  "description": "Traces and logs for Node.js and Bun apps (Express, NestJS, Next.js, Nuxt, Bun.serve): every request with its SQL, logs and errors, N+1 queries found",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@12.11.0",
@@ -89,5 +89,16 @@
     "pg": "^8.23.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
-  }
+  },
+  "keywords": [
+    "bun",
+    "express",
+    "n+1",
+    "nestjs",
+    "nextjs",
+    "nuxt",
+    "opentelemetry",
+    "sql",
+    "tracing"
+  ]
 }
