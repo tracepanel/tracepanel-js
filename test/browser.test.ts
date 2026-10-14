@@ -131,10 +131,10 @@ test("the console in an action keeps where it was logged; a dev server's own cli
   element.click();
   const action = await sentTrace('/books › click "Log"');
 
-  expect(action.logs.map((log) => log["message"])).toEqual(["loaded the books"]);
-  expect(
-    String(action.logs[0]?.["attrs"] && (action.logs[0]["attrs"] as Record<string, unknown>)["code.filepath"]),
-  ).toMatch(/browser\.test\.ts$/);
+  expect(action.logs.map((log) => log.message)).toEqual(["loaded the books"]);
+  expect(String(action.logs[0]?.attrs && (action.logs[0].attrs as Record<string, unknown>)["code.filepath"])).toMatch(
+    /browser\.test\.ts$/,
+  );
 });
 
 test("calls nobody started are background", async () => {

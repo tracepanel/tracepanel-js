@@ -16,9 +16,9 @@ function consolePort(): number {
 
 beforeEach(() => {
   store = mkdtempSync(join(tmpdir(), "tracepanel-agent-test-"));
-  process.env["TRACEPANEL_AGENT_BIN"] = FAKE;
-  delete process.env["FAKE_AGENT_FAIL"];
-  delete process.env["TRACEPANEL_AGENT"];
+  process.env.TRACEPANEL_AGENT_BIN = FAKE;
+  delete process.env.FAKE_AGENT_FAIL;
+  delete process.env.TRACEPANEL_AGENT;
 });
 
 afterEach(() => {
@@ -46,18 +46,18 @@ test("an agent that went away is started anew at once, its old addresses replace
 });
 
 test("an agent that can't start isn't tried again on every call", () => {
-  process.env["FAKE_AGENT_FAIL"] = "1";
+  process.env.FAKE_AGENT_FAIL = "1";
   const starter = new Starter(store);
 
   expect(starter.ensure()).toBe(false);
 
-  delete process.env["FAKE_AGENT_FAIL"];
+  delete process.env.FAKE_AGENT_FAIL;
 
   expect(starter.ensure(true)).toBe(false);
 });
 
 test("an agent named by TRACEPANEL_AGENT is never started", () => {
-  process.env["TRACEPANEL_AGENT"] = "tcp:127.0.0.1:9";
+  process.env.TRACEPANEL_AGENT = "tcp:127.0.0.1:9";
 
   expect(new Starter(store).ensure(true)).toBe(false);
 });

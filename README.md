@@ -225,6 +225,9 @@ Environment variables, as in the Python SDK:
 | --- | --- | --- |
 | `TRACEPANEL_ENABLED` | on unless `NODE_ENV=production` | `0` turns Tracepanel off, `1` on |
 | `TRACEPANEL_SERVICE` | `package.json`'s name | the app's name in the console |
+| `TRACEPANEL_DIR` | `.tracepanel` | the project's store, where the agent keeps the traces |
+| `TRACEPANEL_AGENT_BIN` | the one npm installed | the agent to start, such as a build of your own |
+| `TRACEPANEL_AGENT` | `auto` | an agent elsewhere (`tcp:host:port`), never started |
 | `TRACEPANEL_N_PLUS_ONE_THRESHOLD` | `3` | repeats that make an N+1 |
 | `TRACEPANEL_N_PLUS_ONE_MIN_MS` | `5` | for Redis and other fast stores, the time repeats must take together |
 | `TRACEPANEL_SLOW_SQL_MS` | `100` | a slow query, SQL or MongoDB |

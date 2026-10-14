@@ -48,8 +48,8 @@ beforeEach(() => {
   mkdirSync(join(root, "backend"));
   mkdirSync(join(root, "front"));
   root = join(root, "front");
-  process.env["TRACEPANEL_AGENT_BIN"] = FAKE;
-  delete process.env["TRACEPANEL_CONSOLE"];
+  process.env.TRACEPANEL_AGENT_BIN = FAKE;
+  delete process.env.TRACEPANEL_CONSOLE;
 });
 
 afterEach(() => {
@@ -104,6 +104,6 @@ test("browser: false leaves the recording out", () => {
   expect(
     tracepanel({ browser: false })
       .transformIndexHtml()
-      .map((tag) => tag.attrs["src"]),
+      .map((tag) => tag.attrs.src),
   ).toEqual(["/__tracepanel__/widget.min.js"]);
 });
