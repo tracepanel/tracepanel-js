@@ -36,6 +36,10 @@
     "./bun": {
       "types": "./dist/bun.d.ts",
       "default": "./dist/bun.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
     }
   },
   "bin": {

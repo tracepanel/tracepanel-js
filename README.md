@@ -135,6 +135,23 @@ serve({
 });
 ```
 
+### An SPA on Vite
+
+A single-page app on Vite's dev server gets the badge from the plugin, whatever
+serves its API: an app Tracepanel traces, in Node or in Python. It puts the
+widget into `index.html` and serves the backend's console on Vite's origin,
+from the backend project's `.tracepanel/`:
+
+```ts
+// vite.config.ts
+import { tracepanel } from "tracepanel/vite";
+
+export default { plugins: [tracepanel({ dir: "../backend" })] };
+```
+
+An API on another origin exposes the trace's headers to the page on its CORS
+responses, so the badge lists each call the app makes.
+
 ## What it records
 
 - HTTP requests, with the route and the handler that served them.
