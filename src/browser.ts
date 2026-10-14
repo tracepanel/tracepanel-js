@@ -9,6 +9,10 @@
 //   record({ api: "/__tracepanel__/", service: "shop-web" });
 //
 // tracepanel/vite's plugin loads it by itself. Nothing here runs outside a browser, and nothing imports Node.
+//
+// The page's widget shows them too: each view and action is announced on window ("tracepanel:page") when it starts
+// and when it ends, and each response carries the id of the one that made it (Symbol.for("tracepanel.page") on the
+// Response or the XMLHttpRequest), so the panel lists a page's requests under what the user did.
 
 export interface BrowserOptions {
   /** Where the console is, on the page's origin: "/__tracepanel__/". */
@@ -58,6 +62,36 @@ interface View {
 
 type Trigger = "load" | "navigation" | "click" | "submit" | "background";
 
+/** A view or an action as the widget lists it: announced when it starts (open) and again when it ends. */
+export interface PageAnnouncement {
+  id: string;
+  name: string;
+  /** Microseconds since the epoch. */
+  start: number;
+  /** Microseconds; 0 while open. */
+  duration: number;
+  status: "ok" | "error";
+  open: boolean;
+}
+
+function announce(trace: View["trace"], open: boolean): void {
+  const detail: PageAnnouncement = {
+    id: trace.id,
+    name: trace.name,
+    start: trace.start,
+    duration: trace.duration,
+    status: trace.status,
+    open,
+  };
+  const scope = globalThis as unknown as Record<symbol, Map<string, PageAnnouncement> | undefined>;
+  const seen = scope[ANNOUNCED] ?? new Map<string, PageAnnouncement>();
+  scope[ANNOUNCED] = seen;
+  seen.delete(detail.id);
+  seen.set(detail.id, detail);
+  if (seen.size > ANNOUNCED_MAX) seen.delete(seen.keys().next().value as string);
+  window.dispatchEvent(new CustomEvent("tracepanel:page", { detail }));
+}
+
 /** What the user just did: the action the calls it makes belong to. */
 interface Interaction {
   trigger: "click" | "submit";
@@ -70,6 +104,11 @@ interface Interaction {
 const QUIET_MS = 1000;
 const LONGEST_MS = 15_000;
 const MAX_SPANS = 500;
+// On a Response or an XMLHttpRequest: the view or action that made the call.
+const PAGE = Symbol.for("tracepanel.page");
+// On globalThis: the latest views and actions announced, for a widget that starts listening after them.
+const ANNOUNCED = Symbol.for("tracepanel.pages");
+const ANNOUNCED_MAX = 50;
 // Calls this soon after a click or a submit are its action's; later ones are background.
 const INTERACTION_MS = 1000;
 const LABEL_LENGTH = 40;
@@ -240,6 +279,7 @@ export function record(options: BrowserOptions = {}): void {
     };
     view = started;
     settleLater(started);
+    announce(started.trace, true);
     return started;
   }
 
@@ -268,6 +308,7 @@ export function record(options: BrowserOptions = {}): void {
     if (current.trace.errors.length > 0 || current.trace.spans.some((span) => span.status === "error")) {
       current.trace.status = "error";
     }
+    announce(current.trace, false);
     void send(`${api}api/ingest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -320,7 +361,7 @@ export function record(options: BrowserOptions = {}): void {
   function call(
     method: string,
     raw: string,
-  ): { finish(status: number, failed: boolean): void; traceparent?: string | undefined } {
+  ): { finish(status: number, failed: boolean): void; traceparent?: string | undefined; page?: string } {
     const url = safeUrl(raw);
     if (!url || url.toString().startsWith(api)) return { finish: () => undefined };
     const current = active();
@@ -346,6 +387,7 @@ export function record(options: BrowserOptions = {}): void {
     if (current.trace.spans.length < MAX_SPANS) current.trace.spans.push(span);
     return {
       traceparent: propagate.has(url.origin) ? `00-${current.w3cTraceId}-${spanId}-01` : undefined,
+      page: current.trace.id,
       finish(status, failed) {
         span.duration = nowUs() - span.start;
         current.endUs = Math.max(current.endUs, span.start + span.duration);
@@ -365,6 +407,7 @@ export function record(options: BrowserOptions = {}): void {
     try {
       const response = await send(new Request(request, { headers }));
       out.finish(response.status, false);
+      if (out.page) Object.defineProperty(response, PAGE, { value: out.page });
       return response;
     } catch (error) {
       out.finish(0, true);
@@ -389,6 +432,7 @@ export function record(options: BrowserOptions = {}): void {
     if (target) {
       const out = call(target.method, target.url);
       if (out.traceparent) this.setRequestHeader("traceparent", out.traceparent);
+      if (out.page) Object.defineProperty(this, PAGE, { value: out.page, configurable: true });
       this.addEventListener("loadend", () => out.finish(this.status, this.status === 0));
     }
     return sendXhr.call(this, body);
