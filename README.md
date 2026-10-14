@@ -43,6 +43,25 @@ const app = express();
 app.use(tracepanel());
 ```
 
+The flag is how Tracepanel gets in before the app. An ES module's imports
+all load before any of its code runs, so `import "tracepanel/register"` at
+the top of `server.js` comes too late for Express and the database driver.
+Without the flag, either let the CLI add it:
+
+```json
+{ "scripts": { "dev": "tracepanel run node server.js" } }
+```
+
+or start from a file that loads Tracepanel, then the app:
+
+```js
+// main.js, run with `node main.js`
+import "tracepanel/register";
+await import("./server.js");
+```
+
+The agent starts by itself either way, on the app's first request.
+
 ### NestJS
 
 Nest runs on Express: load Tracepanel the same way and add the same
@@ -244,7 +263,7 @@ Environment variables, as in the Python SDK:
 
 | Command | What it does |
 | --- | --- |
-| `tracepanel run <command>` | runs a Node command with Tracepanel on |
+| `tracepanel run <command>` | runs a Node command with Tracepanel on, such as `tracepanel run node server.js` |
 | `tracepanel dev` | runs the agent in the foreground, with the console on http://127.0.0.1:8765/ |
 | `tracepanel mcp` | gives an AI coding agent your traces over MCP |
 
