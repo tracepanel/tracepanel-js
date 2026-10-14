@@ -42,7 +42,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: npm
-      url: https://www.npmjs.com/package/tracepanel
+      url: https://www.npmjs.com/package/@tracepanel/js
     permissions:
       contents: read
       # What npm's trusted publishing and provenance sign the upload with, in place of a token.
@@ -70,7 +70,7 @@ jobs:
           EOF
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # A pre-release (0.2.0-beta.1) goes under its own dist-tag, so `npm install tracepanel` keeps the latest release.
+      # A pre-release (0.2.0-beta.1) goes under its own dist-tag, so `npm install @tracepanel/js` keeps the latest release.
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

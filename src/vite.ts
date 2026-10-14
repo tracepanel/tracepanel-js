@@ -1,7 +1,7 @@
 // An SPA on Vite's dev server gets the widget, whatever serves its API (Express, Nest, Django, FastAPI):
 //
 //   // vite.config.ts
-//   import { tracepanel } from "tracepanel/vite";
+//   import { tracepanel } from "@tracepanel/js/vite";
 //   export default { plugins: [tracepanel({ dir: "../backend" })] };
 //
 // index.html gets widget.min.js, and /__tracepanel__/ on Vite's own origin goes to the console of the backend
@@ -23,7 +23,7 @@ export interface TracepanelViteOptions {
   /** The console's address itself, such as http://127.0.0.1:8765/ (`tracepanel dev`). TRACEPANEL_CONSOLE too. */
   console?: string;
   /**
-   * Record the pages in the browser too (tracepanel/browser): each view, its calls with a traceparent to the
+   * Record the pages in the browser too (@tracepanel/js/browser): each view, its calls with a traceparent to the
    * backend's traces, its errors and its console. On unless false; `{ service, propagateTo }` sets its options.
    */
   browser?: false | { service?: string; propagateTo?: string[] };

@@ -5,10 +5,10 @@
 // answered (a view: until the page's load too). Calls to the page's own origin carry a W3C traceparent, so the agent links each to the backend's trace
 // of it. The traces go to the console's address (`api`), which the dev server serves on the page's origin.
 //
-//   import { record } from "tracepanel/browser";
+//   import { record } from "@tracepanel/js/browser";
 //   record({ api: "/__tracepanel__/", service: "shop-web" });
 //
-// tracepanel/vite's plugin loads it by itself. Nothing here runs outside a browser, and nothing imports Node.
+// @tracepanel/js/vite's plugin loads it by itself. Nothing here runs outside a browser, and nothing imports Node.
 //
 // The page's widget shows them too: each view and action is announced on window ("tracepanel:page") when it starts
 // and when it ends, and each response carries the id of the one that made it (Symbol.for("tracepanel.page") on the
@@ -22,7 +22,7 @@ export interface BrowserOptions {
   /** Other origins whose calls carry a traceparent (their CORS must allow the header). */
   propagateTo?: string[];
   /**
-   * Scripts whose console isn't the page's, by path prefix: a dev server's own client ("/@vite/"). tracepanel/vite
+   * Scripts whose console isn't the page's, by path prefix: a dev server's own client ("/@vite/"). @tracepanel/js/vite
    * sets Vite's; a library's warnings still count (React's, from /node_modules/).
    */
   ignoreSources?: string[];

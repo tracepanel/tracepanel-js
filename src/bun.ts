@@ -1,10 +1,10 @@
 // Bun's own server, Bun.serve, doesn't go through node:http: a request's root span comes from here. `serve()` takes
 // Bun.serve's options; `withTracepanel()` wraps any fetch handler (Hono's app.fetch, Elysia's handle).
 //
-//   import { serve } from "tracepanel/bun";
+//   import { serve } from "@tracepanel/js/bun";
 //   serve({ routes: { "/api/books/:id": (req) => ... }, fetch: (req) => ... });
 //
-// Start the app with `bun --preload tracepanel/register server.ts` so the database driver is hooked as it loads.
+// Start the app with `bun --preload @tracepanel/js/register server.ts` so the database driver is hooked as it loads.
 
 import { SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { Runtime } from "./runtime.js";
@@ -108,7 +108,7 @@ function tracedRoutes(routes: Routes, onError?: ErrorHandler): Routes {
 /** Bun.serve, with every route and the fetch fallback traced. */
 export function serve<T extends { routes?: Routes; fetch?: Handler; error?: ErrorHandler }>(options: T): unknown {
   const bun = (globalThis as { Bun?: { serve(options: unknown): unknown } }).Bun;
-  if (!bun) throw new Error("tracepanel/bun's serve() runs on Bun");
+  if (!bun) throw new Error("@tracepanel/js/bun's serve() runs on Bun");
   return bun.serve({
     ...options,
     ...(options.routes ? { routes: tracedRoutes(options.routes, options.error) } : {}),

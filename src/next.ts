@@ -3,7 +3,7 @@
 //
 //   // instrumentation.ts
 //   export async function register() {
-//     if (process.env.NEXT_RUNTIME === "nodejs") (await import("tracepanel/next")).register();
+//     if (process.env.NEXT_RUNTIME === "nodejs") (await import("@tracepanel/js/next")).register();
 //   }
 
 import { headersOnResponses } from "./headers.js";
