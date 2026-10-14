@@ -20,6 +20,14 @@
     "./express": {
       "types": "./dist/express.d.ts",
       "default": "./dist/express.js"
+    },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "default": "./dist/next.js"
+    },
+    "./next/widget": {
+      "types": "./dist/next-widget.d.ts",
+      "default": "./dist/next-widget.js"
     }
   },
   "bin": {
@@ -50,10 +58,14 @@
     "@tracepanel/agent": "0.1.1"
   },
   "peerDependencies": {
-    "express": ">=4.18"
+    "express": ">=4.18",
+    "react": ">=18"
   },
   "peerDependenciesMeta": {
     "express": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     }
   },
@@ -63,6 +75,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
     "express": "^5.3.0",
     "pg": "^8.23.1",
     "typescript": "^7.0.2",

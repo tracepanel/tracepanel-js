@@ -23,6 +23,12 @@ interface Building {
   queries: number;
   dbTime: number;
   framework: string;
+  /** performance.now() as the request's root span started. */
+  startedMs: number;
+  /** The request as its root span started: method and target, to find it from a response sent outside its context. */
+  request: string;
+  /** Whether a response's headers have taken this trace's id already. */
+  answered: boolean;
   /** Tracepanel ids of Nest controller spans: the exceptions they record may be HTTP answers, not errors. */
   nestViews: Set<string>;
   /** OTel span id: the Tracepanel id of the span's parent when it started. */
@@ -42,11 +48,34 @@ interface Building {
 // A request's span can end after the response does (Express ends an async handler's span when its promise settles):
 // the trace goes out this long after the request's span ends, with the spans that ended meanwhile.
 const LATE_SPANS_MS = 25;
+// A request whose root span never ends (the client went away mid-stream and the framework didn't end it) is dropped
+// after this long, so the open traces don't grow for ever.
+const ABANDONED_MS = 10 * 60 * 1000;
 
 // Spans that are bookkeeping, not work: Express's middleware and routers, a driver's connection checkouts, and
 // Nest's inner handler span (the same call as its request context span, which names the controller).
 const SKIPPED_EXPRESS = new Set(["middleware", "router"]);
 const SKIPPED_NEST = new Set(["handler", "app_creation"]);
+// Next.js's own bookkeeping: finding and loading the route's modules, the first byte, metadata.
+const SKIPPED_NEXT = new Set([
+  "NextNodeServer.findPageComponents",
+  "NextNodeServer.getLayoutOrPageModule",
+  "NextNodeServer.startResponse",
+  "NextNodeServer.clientComponentLoading",
+  "NextNodeServer.createComponentTree",
+  "LoadComponents.loadRouteModule",
+  "RouteModule.prepare",
+  "ResolveMetadata.generateMetadata",
+]);
+// What runs a Next.js route: an app or pages render, a route handler, getServerSideProps.
+const NEXT_HANDLERS = new Set([
+  "AppRender.getBodyResult",
+  "AppRouteRouteHandlers.runHandler",
+  "Render.getServerSideProps",
+  "Render.renderDocument",
+]);
+// Next.js's requests for its own assets and dev tooling, not the app's.
+const NEXT_INTERNAL = /^\/(_next|__nextjs)/;
 const SKIPPED_NAMES = /^(pg\.connect|pg-pool\.connect|mysql2?\.connect)/;
 
 function attrsOf(span: ReadableSpan | SdkSpan): Attrs {
@@ -75,6 +104,7 @@ function skipped(span: ReadableSpan | SdkSpan): boolean {
   return (
     SKIPPED_EXPRESS.has(String(attrs["express.type"])) ||
     SKIPPED_NEST.has(String(attrs["nestjs.type"])) ||
+    SKIPPED_NEXT.has(String(attrs["next.span_type"])) ||
     SKIPPED_NAMES.test(span.name)
   );
 }
@@ -99,7 +129,14 @@ export class TracepanelProcessor implements SpanProcessor {
     if (!parent) {
       // Work outside a request (a script, a job) isn't traced yet.
       if (span.kind !== SpanKind.SERVER) return;
+      if (NEXT_INTERNAL.test(String(first(attrsOf(span), "http.target", "url.path") ?? ""))) return;
+      this.dropAbandoned();
       building = this.start();
+      const rootAttrs = attrsOf(span);
+      building.request = requestKey(
+        first(rootAttrs, "http.request.method", "http.method"),
+        first(rootAttrs, "http.target", "url.path"),
+      );
       this.open.set(context.traceId, building);
     }
     if (!building) return;
@@ -118,6 +155,7 @@ export class TracepanelProcessor implements SpanProcessor {
       building.framework = "NestJS";
     }
     building.parents.set(context.spanId, parent ? (building.ids.get(parent.spanId) ?? null) : null);
+    if (!parent && attrs["next.span_type"] === "BaseServer.handleRequest") building.framework = "Next.js";
     building.ids.set(context.spanId, newId());
     building.origins.set(context.spanId, found ?? building.lastOrigin);
   }
@@ -160,11 +198,37 @@ export class TracepanelProcessor implements SpanProcessor {
   }
 
   /** What the widget shows before the request's span ends: its id, its queries so far and their time. */
-  timing(): { id: string; queries: number; dbMs: number } | undefined {
-    const current = this.current();
-    if (!current) return undefined;
-    const { building } = current;
-    return { id: building.trace.id, queries: building.queries, dbMs: building.dbTime / 1000 };
+  timing(request?: { method: string; url: string }): Timing | undefined {
+    const building = this.current()?.building ?? (request ? this.waiting(request) : undefined);
+    if (!building) return undefined;
+    // A response's headers took it: another response to the same URL is another request's.
+    if (request) building.answered = true;
+    return {
+      id: building.trace.id,
+      queries: building.queries,
+      dbMs: building.dbTime / 1000,
+      startedMs: building.startedMs,
+    };
+  }
+
+  private dropAbandoned(): void {
+    const oldest = performance.now() - ABANDONED_MS;
+    for (const [traceId, building] of this.open) {
+      if (building.startedMs < oldest) this.open.delete(traceId);
+    }
+  }
+
+  /**
+   * The open trace of a request whose response goes out outside its context (Next.js streams a page from another
+   * async context): the latest one for this method and URL that no response has answered yet.
+   */
+  private waiting(request: { method: string; url: string }): Building | undefined {
+    const key = requestKey(request.method, request.url);
+    let found: Building | undefined;
+    for (const building of this.open.values()) {
+      if (building.request === key && !building.answered) found = building;
+    }
+    return found;
   }
 
   addLog(log: Omit<Log, "span_id">): void {
@@ -204,6 +268,9 @@ export class TracepanelProcessor implements SpanProcessor {
       queries: 0,
       dbTime: 0,
       framework: "node:http",
+      startedMs: performance.now(),
+      request: "",
+      answered: false,
       replaced: new Set(),
       nestViews: new Set(),
       expressHandlers: new Set(),
@@ -237,6 +304,10 @@ export class TracepanelProcessor implements SpanProcessor {
     } else if (attrs["express.type"] === "request_handler") {
       converted.kind = "view";
       converted.name = String(attrs["express.name"] ?? span.name);
+      building.trace.attrs["code.view"] = converted.name;
+    } else if (NEXT_HANDLERS.has(String(attrs["next.span_type"]))) {
+      converted.kind = "view";
+      converted.name = String(first(attrs, "next.route", "next.page") ?? span.name);
       building.trace.attrs["code.view"] = converted.name;
     } else if (attrs["nestjs.type"] === "request_context") {
       converted.kind = "view";
@@ -301,7 +372,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const attrs = attrsOf(root);
     const method = String(first(attrs, "http.request.method", "http.method") ?? "GET");
     const path = String(first(attrs, "url.path", "http.target") ?? "/").split("?")[0];
-    const route = first(attrs, "http.route");
+    const route = first(attrs, "http.route", "next.route");
     const status = Number(first(attrs, "http.response.status_code", "http.status_code") ?? 0);
     const tr = building.trace;
     if (status > 0 && status < 500) {
@@ -328,6 +399,18 @@ export class TracepanelProcessor implements SpanProcessor {
       "tracepanel.framework": building.framework,
     };
   }
+}
+
+export interface Timing {
+  id: string;
+  queries: number;
+  dbMs: number;
+  /** performance.now() as the request started. */
+  startedMs: number;
+}
+
+function requestKey(method: unknown, target: unknown): string {
+  return `${String(method ?? "GET").toUpperCase()} ${String(target ?? "/")}`;
 }
 
 /** `Node 26 · Express`: what the panel shows next to its logo. */

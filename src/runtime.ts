@@ -3,12 +3,18 @@
 import { ConsoleUrl, Sender, Starter } from "./agent.js";
 import { type Config, loadConfig } from "./config.js";
 import { TracepanelProcessor } from "./processor.js";
+import { type Badge, type BadgeRequest, badge } from "./widget.js";
 
 export interface Runtime {
   config: Config;
   processor: TracepanelProcessor;
   starter: Starter;
   console: ConsoleUrl;
+  /**
+   * The active request's headers and script tag. On the shared object so that code bundled apart from the SDK's
+   * OpenTelemetry (a Next.js layout) can read it without importing any of it.
+   */
+  badge(request: BadgeRequest): Badge | undefined;
 }
 
 const KEY = Symbol.for("tracepanel.runtime");
@@ -22,6 +28,13 @@ export function runtime(): Runtime | undefined {
   if (!config.enabled) return undefined;
   const starter = new Starter(config.storeDir);
   const processor = new TracepanelProcessor(config, new Sender(config, starter));
-  holder[KEY] = { config, processor, starter, console: new ConsoleUrl(config.storeDir) };
-  return holder[KEY];
+  const made: Runtime = {
+    config,
+    processor,
+    starter,
+    console: new ConsoleUrl(config.storeDir),
+    badge: (request) => badge(made, request),
+  };
+  holder[KEY] = made;
+  return made;
 }
