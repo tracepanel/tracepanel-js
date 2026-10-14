@@ -1,0 +1,53 @@
+name: CI
+
+# Lint, types, the unit tests and the build, on every Node.js the package supports, and the build loaded by Bun.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20.19", "22", "24", "26"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      # What `node --import tracepanel/register` loads: it must start without the app.
+      - run: node --input-type=module -e "await import('./dist/register.js'); console.log('register loads')"
+
+  bun:
+    name: Bun
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: bun --preload ./dist/register.js -e "const { withTracepanel } = await import('./dist/bun.js'); console.log(typeof withTracepanel)"

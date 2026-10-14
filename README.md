@@ -8,8 +8,6 @@ console.
 
 It runs while you develop, and everything stays on your machine.
 
-This package is in early development and not on npm yet.
-
 ## Setup
 
 ```bash
@@ -140,12 +138,48 @@ serve({
 ## What it records
 
 - HTTP requests, with the route and the handler that served them.
-- SQL from `pg` and `mysql2`, with the line of your code that ran each
-  statement.
+- SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
+  Prisma's driver adapters), with the line of your code that ran each
+  statement. Prisma's operations show as steps.
+- Redis commands (`ioredis`, `redis`) and MongoDB commands, with their own
+  N+1 and duplicates.
+- Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios.
+- BullMQ: each job a worker runs is a task, each job the app adds a step.
 - `console` calls made during a request, and Nest's `Logger`.
 - Errors thrown in a handler, with your frames and their source.
 - The caller's trace, when a request carries a W3C `traceparent`: the agent
   links the two.
+
+## Your own steps and traces
+
+```js
+import { span, trace } from "tracepanel";
+
+await trace("nightly cleanup", async () => {
+  await span("load stale rows", () => loadStaleRows());
+});
+```
+
+`trace()` makes a script or a scheduled job a trace of its own, and inside a
+request it is a step. `span()` is a step of the current trace. Outside
+development they run the function and nothing else. Run a script with
+`npx tracepanel run node script.js`.
+
+## Settings
+
+Environment variables, as in the Python SDK:
+
+| Variable | Default | What it sets |
+| --- | --- | --- |
+| `TRACEPANEL_ENABLED` | on unless `NODE_ENV=production` | `0` turns Tracepanel off, `1` on |
+| `TRACEPANEL_SERVICE` | `package.json`'s name | the app's name in the console |
+| `TRACEPANEL_N_PLUS_ONE_THRESHOLD` | `3` | repeats that make an N+1 |
+| `TRACEPANEL_N_PLUS_ONE_MIN_MS` | `5` | for Redis and other fast stores, the time repeats must take together |
+| `TRACEPANEL_SLOW_SQL_MS` | `100` | a slow query, SQL or MongoDB |
+| `TRACEPANEL_SLOW_HTTP_MS` | `500` | a slow outgoing HTTP call |
+| `TRACEPANEL_LONG_TRANSACTION_MS` | `500` | a long transaction |
+| `TRACEPANEL_QUEUE_WAIT_MS` | `1000` | a task that waited long for a worker |
+| `TRACEPANEL_LARGE_RESULT_ROWS` | `1000` | a query without a LIMIT that read too many rows |
 
 ## Command line
 

@@ -1,6 +1,6 @@
 {
   "name": "tracepanel",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "description": "Traces and logs for Node.js and Bun apps (Express, NestJS, Next.js, Nuxt, Bun.serve): every request with its SQL, logs and errors, N+1 queries found",
   "license": "MIT",
   "type": "module",
@@ -47,7 +47,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "biome check . && tsc --noEmit",
@@ -105,5 +105,10 @@
     "opentelemetry",
     "sql",
     "tracing"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tracepanel/tracepanel-js.git"
+  },
+  "homepage": "https://tracepanel.dev"
 }
