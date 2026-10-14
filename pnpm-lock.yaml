@@ -196,6 +196,9 @@ importers:
       '@tracepanel/agent':
         specifier: 0.1.1
         version: 0.1.1
+      import-in-the-middle:
+        specifier: ^3.5.2
+        version: 3.5.2
       react:
         specifier: '>=18'
         version: 19.3.0

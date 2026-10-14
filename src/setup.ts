@@ -11,6 +11,7 @@ import { MySQL2Instrumentation } from "@opentelemetry/instrumentation-mysql2";
 import { NestInstrumentation } from "@opentelemetry/instrumentation-nestjs-core";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-middle/register-hooks.mjs";
 import { captureConsole } from "./console.js";
 import { NestLogs } from "./logs.js";
 import { type Runtime, runtime } from "./runtime.js";
@@ -66,7 +67,9 @@ export function start(options: Options = {}): Runtime | undefined {
   const holder = globalThis as { [STARTED]?: boolean };
   if (!tracepanel || holder[STARTED] || nuxtDevProxy()) return tracepanel;
   holder[STARTED] = true;
-  register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
+  // The ESM loader hook, in the app's thread where Node can (module.register() is deprecated from Node 26).
+  if (supportsSyncHooks()) registerSyncHooks();
+  else register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
   new NodeTracerProvider({ spanProcessors: [tracepanel.processor] }).register();
   const instrumentations: Instrumentation[] = [
     new ExpressInstrumentation(),
