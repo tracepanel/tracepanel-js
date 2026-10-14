@@ -59,7 +59,8 @@ export function tracepanel() {
       }
       let body = Buffer.concat(chunks);
       const page = String(res.getHeader("content-type") ?? "").includes("text/html");
-      const marks = badge(tp, { method: req.method, status: res.statusCode, startedMs, page, framework: "Express" });
+      const framework = tp.processor.framework() ?? "Express";
+      const marks = badge(tp, { method: req.method, status: res.statusCode, startedMs, page, framework });
       if (marks) {
         for (const [name, value] of Object.entries(marks.headers)) res.setHeader(name, value);
         if (marks.script) body = Buffer.from(inject(body.toString("utf8"), marks.script));

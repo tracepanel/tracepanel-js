@@ -43,10 +43,11 @@
     "@opentelemetry/instrumentation-express": "^0.71.0",
     "@opentelemetry/instrumentation-http": "^0.223.0",
     "@opentelemetry/instrumentation-mysql2": "^0.69.0",
+    "@opentelemetry/instrumentation-nestjs-core": "^0.69.0",
     "@opentelemetry/instrumentation-pg": "^0.75.0",
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
-    "@tracepanel/agent": "0.0.1-alpha.1"
+    "@tracepanel/agent": "0.1.1"
   },
   "peerDependencies": {
     "express": ">=4.18"

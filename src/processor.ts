@@ -23,6 +23,14 @@ interface Building {
   queries: number;
   dbTime: number;
   framework: string;
+  /** Tracepanel ids of Nest controller spans: the exceptions they record may be HTTP answers, not errors. */
+  nestViews: Set<string>;
+  /** OTel span id: the Tracepanel id of the span's parent when it started. */
+  parents: Map<string, string | null>;
+  /** Express's anonymous route handlers that a Nest controller's span stands in for: left out, children and all. */
+  replaced: Set<string>;
+  /** OTel span id: the Express route handlers' ones, so a Nest span under one can take its place. */
+  expressHandlers: Set<string>;
   /**
    * The app's line behind the latest span that had one. A driver often starts its query span later, from a callback
    * (pg's pool runs the query once it has a connection), where the stack holds none of the app's code; the
@@ -35,8 +43,10 @@ interface Building {
 // the trace goes out this long after the request's span ends, with the spans that ended meanwhile.
 const LATE_SPANS_MS = 25;
 
-// Spans that are bookkeeping, not work: Express's middleware and routers, a driver's connection checkouts.
+// Spans that are bookkeeping, not work: Express's middleware and routers, a driver's connection checkouts, and
+// Nest's inner handler span (the same call as its request context span, which names the controller).
 const SKIPPED_EXPRESS = new Set(["middleware", "router"]);
+const SKIPPED_NEST = new Set(["handler", "app_creation"]);
 const SKIPPED_NAMES = /^(pg\.connect|pg-pool\.connect|mysql2?\.connect)/;
 
 function attrsOf(span: ReadableSpan | SdkSpan): Attrs {
@@ -62,7 +72,11 @@ function startUs(span: ReadableSpan): number {
 
 function skipped(span: ReadableSpan | SdkSpan): boolean {
   const attrs = attrsOf(span);
-  return SKIPPED_EXPRESS.has(String(attrs["express.type"])) || SKIPPED_NAMES.test(span.name);
+  return (
+    SKIPPED_EXPRESS.has(String(attrs["express.type"])) ||
+    SKIPPED_NEST.has(String(attrs["nestjs.type"])) ||
+    SKIPPED_NAMES.test(span.name)
+  );
 }
 
 function statementOf(attrs: Attrs): string {
@@ -95,6 +109,15 @@ export class TracepanelProcessor implements SpanProcessor {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
       return;
     }
+    const attrs = attrsOf(span);
+    if (attrs["express.type"] === "request_handler") building.expressHandlers.add(context.spanId);
+    if (parent && attrs["nestjs.type"] === "request_context" && building.expressHandlers.has(parent.spanId)) {
+      // Nest's router is Express's route handler: the controller's span takes its place in the tree.
+      building.replaced.add(parent.spanId);
+      building.ids.set(parent.spanId, building.parents.get(parent.spanId) ?? null);
+      building.framework = "NestJS";
+    }
+    building.parents.set(context.spanId, parent ? (building.ids.get(parent.spanId) ?? null) : null);
     building.ids.set(context.spanId, newId());
     building.origins.set(context.spanId, found ?? building.lastOrigin);
   }
@@ -109,6 +132,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const building = this.open.get(context.traceId);
     if (!building) return;
     const root = !span.parentSpanContext;
+    if (building.replaced.has(context.spanId)) return;
     if (root || !skipped(span)) this.convert(building, span, root);
     if (!root) return;
     setTimeout(() => {
@@ -148,9 +172,15 @@ export class TracepanelProcessor implements SpanProcessor {
     current?.building.trace.logs.push({ ...log, span_id: current.spanId });
   }
 
+  /** The framework the active request runs on, unless a more specific one (Nest on Express) already said so. */
   setFramework(name: string): void {
     const current = this.current();
-    if (current) current.building.framework = name;
+    if (current && current.building.framework === "node:http") current.building.framework = name;
+  }
+
+  /** The framework the active request ran on, as the panel shows it. */
+  framework(): string | undefined {
+    return this.current()?.building.framework;
   }
 
   private start(): Building {
@@ -174,6 +204,10 @@ export class TracepanelProcessor implements SpanProcessor {
       queries: 0,
       dbTime: 0,
       framework: "node:http",
+      replaced: new Set(),
+      nestViews: new Set(),
+      expressHandlers: new Set(),
+      parents: new Map(),
       lastOrigin: null,
     };
   }
@@ -204,6 +238,11 @@ export class TracepanelProcessor implements SpanProcessor {
       converted.kind = "view";
       converted.name = String(attrs["express.name"] ?? span.name);
       building.trace.attrs["code.view"] = converted.name;
+    } else if (attrs["nestjs.type"] === "request_context") {
+      converted.kind = "view";
+      converted.name = `${attrs["nestjs.controller"] ?? "Controller"}.${attrs["nestjs.callback"] ?? span.name}`;
+      building.trace.attrs["code.view"] = converted.name;
+      building.nestViews.add(id);
     } else if (sql) {
       converted.kind = "sql";
       converted.name = spanName(sql);
@@ -265,6 +304,10 @@ export class TracepanelProcessor implements SpanProcessor {
     const route = first(attrs, "http.route");
     const status = Number(first(attrs, "http.response.status_code", "http.status_code") ?? 0);
     const tr = building.trace;
+    if (status > 0 && status < 500) {
+      // Nest throws NotFoundException and the like to answer 404, 422…: an answer, not an error.
+      tr.errors = tr.errors.filter((error) => !building.nestViews.has(error.span_id ?? ""));
+    }
     tr.name = `${method} ${typeof route === "string" && route ? route : path}`;
     tr.start = startUs(root);
     tr.duration = durationUs(root);
