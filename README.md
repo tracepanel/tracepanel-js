@@ -149,21 +149,43 @@ import { tracepanel } from "tracepanel/vite";
 export default { plugins: [tracepanel({ dir: "../backend" })] };
 ```
 
-An API on another origin exposes the trace's headers to the page on its CORS
-responses, so the badge lists each call the app makes.
+When the page loads before the API's first request, the plugin starts the
+backend's agent itself, as the SDK would. The console answers this machine
+only, even with Vite on the network (`vite --host`): its traces and what it
+lets a local caller do, such as switching the user, are the developer's.
 
-The plugin also records the pages in the browser: each view and each burst
-of activity after it is a trace of its own, in the console's Pages, with the
-page's calls to its API, its errors and its console. A call to the page's own
-origin carries a W3C `traceparent`, so the console links it to the API's
-trace; `propagateTo` names other origins (their CORS must allow the header):
+An API on another origin exposes the trace's headers to the page on its CORS
+responses, so the badge lists each call the app makes. A backend that serves
+its own console (Django, FastAPI) is named with `console`:
+
+```ts
+tracepanel({ console: "http://localhost:8000/__tracepanel__/" });
+```
+
+The plugin also records the pages in the browser. Each view (the page's load,
+or a route change) is a trace, and so is each action on it: a click or a
+submit that called the API, named after the control (`click "Save"`), or
+background calls nobody started. Each has its calls, its errors and its
+console, with the line that logged each record, and lasts until its last
+call answered. The console lists them in Pages, the page's view first and
+its actions under it, and the badge's panel lists each action over the
+requests it made.
+
+A call to the page's own origin carries a W3C `traceparent`, so the console
+links it to the API's trace. `propagateTo` names other origins, whose CORS
+must allow the header:
 
 ```ts
 tracepanel({ dir: "../backend", browser: { service: "shop-web", propagateTo: ["http://127.0.0.1:8000"] } });
 ```
 
+`browser: false` leaves the recording out. Vite's own client logs (its
+connection, hot reload) stay out of the pages' traces.
+
 Without Vite, call `record()` from `tracepanel/browser` in the page, with the
 console on the page's origin (`api`, `/__tracepanel__/` by default).
+`ignoreSources` takes the path prefixes of scripts whose console isn't the
+page's, such as a dev server's client.
 
 ## What it records
 
