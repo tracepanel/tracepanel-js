@@ -79,5 +79,11 @@ jobs:
             *-*) tag=$(echo "${GITHUB_REF_NAME#*-}" | cut -d. -f1) ;;
             *) tag=latest ;;
           esac
+          # Already there (published by hand, or a run retried): nothing to do, as npm won't take a version twice.
+          name=$(node -p 'require("./package.json").name')
+          if [ "$(npm view "$name@$GITHUB_REF_NAME" version 2>/dev/null)" = "$GITHUB_REF_NAME" ]; then
+            echo "::notice::$GITHUB_REF_NAME is on npm already"
+            exit 0
+          fi
           npm publish --access public --tag "$tag" --provenance
           echo "::notice::$GITHUB_REF_NAME is on npm"
