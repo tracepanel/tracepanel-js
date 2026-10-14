@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { type Context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
 import { type Attrs, type Log, micros, newId, type Span, type Trace } from "./model.js";
 import { fingerprint, spanName, statement } from "./sql.js";
@@ -80,7 +81,9 @@ const NEXT_HANDLERS = new Set([
 ]);
 // Next.js's requests for its own assets and dev tooling, not the app's.
 const NEXT_INTERNAL = /^\/(_next|__nextjs)/;
-const SKIPPED_NAMES = /^(pg\.connect|pg-pool\.connect|mysql2?\.connect)/;
+// Prisma's own spans besides the operation: its SQL goes through the driver adapter's driver (pg, mysql2), recorded
+// there; the rest is its query engine's bookkeeping.
+const SKIPPED_NAMES = /^(pg\.connect|pg-pool\.connect|mysql2?\.connect|prisma:(?!client:operation$))/;
 
 function attrsOf(span: ReadableSpan | SdkSpan): Attrs {
   return { ...(span as ReadableSpan).attributes };
@@ -119,7 +122,13 @@ function statementOf(attrs: Attrs): string {
 }
 
 export class TracepanelProcessor implements SpanProcessor {
+  /** The traces being built, by their root span's OTel id. */
   private readonly open = new Map<string, Building>();
+  /**
+   * OTel span id → the trace it belongs to. Not the OTel trace id: a request the app makes to itself (fetch to its own
+   * API) carries the caller's trace id, and is a trace of its own all the same.
+   */
+  private readonly owner = new Map<string, Building>();
 
   constructor(
     private readonly config: Config,
@@ -129,24 +138,27 @@ export class TracepanelProcessor implements SpanProcessor {
   onStart(span: SdkSpan, _parentContext: Context): void {
     const context = span.spanContext();
     const parent = span.parentSpanContext;
-    let building = this.open.get(context.traceId);
-    // A request that came from another process (with its traceparent) starts this process's trace all the same.
-    const local = !parent || (parent.isRemote === true && span.kind === SpanKind.SERVER && !building);
+    let building = parent ? this.owner.get(parent.spanId) : undefined;
+    // A request that came with a traceparent (from another app, or this one calling itself) starts a trace here.
+    const local = !parent || (parent.isRemote === true && span.kind === SpanKind.SERVER);
     if (local) {
-      // Work outside a request (a script, a job) isn't traced yet.
-      if (span.kind !== SpanKind.SERVER) return;
+      // A request, or work outside one that trace() or a task queue started: tracepanel.kind says which.
+      const kind = attrsOf(span)["tracepanel.kind"];
+      if (span.kind !== SpanKind.SERVER && kind !== "command" && kind !== "task") return;
       if (NEXT_INTERNAL.test(String(first(attrsOf(span), "http.target", "url.path") ?? ""))) return;
       this.dropAbandoned();
       building = this.start();
+      if (kind === "command" || kind === "task") building.trace.kind = kind;
       building.rootSpanId = context.spanId;
       const rootAttrs = attrsOf(span);
       building.request = requestKey(
         first(rootAttrs, "http.request.method", "http.method"),
         first(rootAttrs, "http.target", "url.path"),
       );
-      this.open.set(context.traceId, building);
+      this.open.set(context.spanId, building);
     }
     if (!building) return;
+    this.owner.set(context.spanId, building);
     const found = origin(this.config.root);
     if (found) building.lastOrigin = found;
     if (!local && parent && skipped(span)) {
@@ -174,14 +186,14 @@ export class TracepanelProcessor implements SpanProcessor {
       );
     }
     const context = span.spanContext();
-    const building = this.open.get(context.traceId);
+    const building = this.owner.get(context.spanId);
     if (!building) return;
     const root = context.spanId === building.rootSpanId;
     if (building.replaced.has(context.spanId)) return;
     if (root || !skipped(span)) this.convert(building, span, root);
     if (!root) return;
     setTimeout(() => {
-      this.open.delete(context.traceId);
+      this.close(building);
       this.finish(building, span);
       this.sink.submit(building.trace);
     }, LATE_SPANS_MS).unref();
@@ -200,7 +212,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const span = trace.getActiveSpan();
     if (!span) return undefined;
     const context = span.spanContext();
-    const building = this.open.get(context.traceId);
+    const building = this.owner.get(context.spanId);
     return building ? { building, spanId: building.ids.get(context.spanId) ?? null } : undefined;
   }
 
@@ -220,9 +232,15 @@ export class TracepanelProcessor implements SpanProcessor {
 
   private dropAbandoned(): void {
     const oldest = performance.now() - ABANDONED_MS;
-    for (const [traceId, building] of this.open) {
-      if (building.startedMs < oldest) this.open.delete(traceId);
+    for (const building of [...this.open.values()]) {
+      if (building.startedMs < oldest) this.close(building);
     }
+  }
+
+  /** The trace is done here: its spans no longer lead to it. */
+  private close(building: Building): void {
+    this.open.delete(building.rootSpanId);
+    for (const spanId of building.ids.keys()) this.owner.delete(spanId);
   }
 
   /**
@@ -331,9 +349,9 @@ export class TracepanelProcessor implements SpanProcessor {
       attrs: {},
     };
     const codeOrigin = building.origins.get(context.spanId) ?? null;
-    const sql = statementOf(attrs);
+    const sql = isRedis(attrs) || isMongo(attrs) ? "" : statementOf(attrs);
     if (root) {
-      converted.kind = "http";
+      converted.kind = { http: "http", task: "task.run", command: "command" }[building.trace.kind];
     } else if (attrs["express.type"] === "request_handler") {
       converted.kind = "view";
       converted.name = String(attrs["express.name"] ?? span.name);
@@ -347,6 +365,26 @@ export class TracepanelProcessor implements SpanProcessor {
       converted.name = `${attrs["nestjs.controller"] ?? "Controller"}.${attrs["nestjs.callback"] ?? span.name}`;
       building.trace.attrs["code.view"] = converted.name;
       building.nestViews.add(id);
+    } else if (attrs["tracepanel.span_kind"] === "task.enqueue") {
+      converted.kind = "task.enqueue";
+      converted.name = String(attrs["task.name"] ?? span.name);
+      converted.attrs = {
+        ...Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("task."))),
+        "code.origin": codeOrigin,
+      };
+    } else if (isRedis(attrs)) {
+      const call = redisCall(attrs, span.name);
+      converted.kind = "redis";
+      converted.name = call.name;
+      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
+    } else if (isMongo(attrs)) {
+      const call = mongoCall(attrs, span.name);
+      converted.kind = "mongodb";
+      converted.name = call.name;
+      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
+    } else if (span.name === "prisma:client:operation") {
+      converted.name = `prisma ${attrs.model ? `${attrs.model}.` : ""}${attrs.method ?? "operation"}`;
+      converted.attrs = { "code.origin": codeOrigin };
     } else if (sql) {
       converted.kind = "sql";
       converted.name = spanName(sql);
@@ -354,8 +392,10 @@ export class TracepanelProcessor implements SpanProcessor {
       building.queries += 1;
       building.dbTime += converted.duration;
     } else if (span.kind === SpanKind.CLIENT && first(attrs, "http.request.method", "http.method")) {
+      const call = httpCall(attrs);
       converted.kind = "http.client";
-      converted.attrs = { ...attrs, "code.origin": codeOrigin };
+      converted.name = call.name;
+      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
     } else {
       converted.attrs = { ...attrs, "code.origin": codeOrigin };
     }
@@ -402,6 +442,10 @@ export class TracepanelProcessor implements SpanProcessor {
 
   /** The trace from its root span: name, timing, the request's attributes. */
   private finish(building: Building, root: ReadableSpan): void {
+    if (building.trace.kind !== "http") {
+      this.finishWork(building, root);
+      return;
+    }
     const attrs = attrsOf(root);
     const method = String(first(attrs, "http.request.method", "http.method") ?? "GET");
     const path = String(first(attrs, "url.path", "http.target") ?? "/").split("?")[0];
@@ -434,6 +478,32 @@ export class TracepanelProcessor implements SpanProcessor {
       "w3c.trace_id": root.spanContext().traceId,
     };
     if (root.parentSpanContext?.isRemote) tr.attrs["w3c.parent_span_id"] = root.parentSpanContext.spanId;
+  }
+
+  /** A command (trace()) or a task (a queue's job): named as it was started, its task.* attributes kept. */
+  private finishWork(building: Building, root: ReadableSpan): void {
+    const attrs = attrsOf(root);
+    const tr = building.trace;
+    tr.name = String(attrs["tracepanel.name"] ?? root.name);
+    tr.start = startUs(root);
+    tr.duration = durationUs(root);
+    if (root.status.code === SpanStatusCode.ERROR || tr.errors.length > 0) tr.status = "error";
+    const rootSpan = tr.spans.find((span) => span.parent_id === null);
+    if (rootSpan) {
+      rootSpan.name = tr.name;
+      rootSpan.attrs = {};
+    }
+    const own = Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("task.")));
+    tr.attrs = {
+      ...tr.attrs,
+      ...own,
+      "service.name": this.config.service,
+      "service.role": tr.kind === "task" ? "worker" : "command",
+      "telemetry.sdk.language": "nodejs",
+      "process.runtime.name": process.versions.bun ? "bun" : "node",
+      "process.runtime.version": process.versions.bun ?? process.versions.node,
+      "w3c.trace_id": root.spanContext().traceId,
+    };
   }
 }
 

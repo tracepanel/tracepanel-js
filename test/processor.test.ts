@@ -2,11 +2,18 @@ import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Config } from "../src/config.js";
+import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
 
-const config: Config = { enabled: true, root: "/app", storeDir: "/app/.tracepanel", service: "shop", maxTraces: 2000 };
+const config: Config = {
+  ...loadConfig({}),
+  enabled: true,
+  root: "/app",
+  storeDir: "/app/.tracepanel",
+  service: "shop",
+  maxTraces: 2000,
+};
 const sent: Trace[] = [];
 const processor = new TracepanelProcessor(config, { submit: (trace) => sent.push(trace) });
 const provider = new BasicTracerProvider({ spanProcessors: [processor] });

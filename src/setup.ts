@@ -7,11 +7,17 @@ import { isMainThread } from "node:worker_threads";
 import { type Instrumentation, registerInstrumentations } from "@opentelemetry/instrumentation";
 import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
+import { IORedisInstrumentation } from "@opentelemetry/instrumentation-ioredis";
+import { MongoDBInstrumentation } from "@opentelemetry/instrumentation-mongodb";
 import { MySQL2Instrumentation } from "@opentelemetry/instrumentation-mysql2";
 import { NestInstrumentation } from "@opentelemetry/instrumentation-nestjs-core";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
+import { RedisInstrumentation } from "@opentelemetry/instrumentation-redis";
+import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-middle/register-hooks.mjs";
+import { BullMQInstrumentation } from "./bullmq.js";
 import { captureConsole } from "./console.js";
 import { NestLogs } from "./logs.js";
 import { type Runtime, runtime } from "./runtime.js";
@@ -78,8 +84,17 @@ export function start(options: Options = {}): Runtime | undefined {
     new NestLogs(tracepanel.processor),
     new PgInstrumentation({ enhancedDatabaseReporting: true }),
     new MySQL2Instrumentation(),
+    new IORedisInstrumentation(),
+    new RedisInstrumentation(),
+    // The command with its values: Tracepanel keeps their shape and a hash, which tells duplicates from an N+1.
+    new MongoDBInstrumentation({ enhancedDatabaseReporting: true }),
+    new PrismaInstrumentation(),
+    new BullMQInstrumentation(),
+    // fetch(): Node's own, through undici.
+    new UndiciInstrumentation(),
+    // Outgoing calls through node:http (axios, got) always; the server's requests unless the framework traces them.
+    new HttpInstrumentation(options.httpServer === false ? { ignoreIncomingRequestHook: () => true } : {}),
   ];
-  if (options.httpServer !== false) instrumentations.unshift(new HttpInstrumentation());
   registerInstrumentations({ instrumentations });
   captureConsole(tracepanel.processor);
   return tracepanel;

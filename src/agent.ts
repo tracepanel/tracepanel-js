@@ -202,7 +202,9 @@ export class Sender {
       socket.setTimeout(500, fail);
       socket.once("error", fail);
       socket.once("connect", () => {
-        socket.write(`${JSON.stringify({ protocol: PROTOCOL, max_traces: this.config.maxTraces })}\n`);
+        // The agent finds the issues with this project's limits.
+        const hello = { protocol: PROTOCOL, max_traces: this.config.maxTraces, thresholds: this.config.thresholds };
+        socket.write(`${JSON.stringify(hello)}\n`);
       });
       let answer = "";
       socket.on("data", function onData(chunk) {
