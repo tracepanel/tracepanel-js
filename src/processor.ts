@@ -423,7 +423,10 @@ export class TracepanelProcessor implements SpanProcessor {
     // pg reports the parameters with enhancedDatabaseReporting: the same statement with the same values is a
     // duplicate, the same statement with other values an N+1 candidate.
     const values = first(attrs, "db.postgresql.values", "db.query.parameter");
+    // What EXPLAIN binds back: pg's values; mysql2 writes them into the statement itself.
+    const params = Array.isArray(values) ? values : system === "mysql" ? [] : undefined;
     return {
+      ...(params ? { "db.params": params } : {}),
       "db.client": system === "postgresql" ? "pg" : system,
       "db.system": system,
       "db.vendor": system,
