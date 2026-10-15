@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-15)
+
+It needs `@tracepanel/agent` 0.3.0, installed with it: its console finds
+logs by the spans they were written in and follows calls to another
+project's app to its trace.
 
 ### Added
 
