@@ -7,7 +7,17 @@ import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetr
 import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
 import { withVersion } from "./frameworks.js";
-import { type Attrs, type Log, micros, newId, type Span, type Trace } from "./model.js";
+import {
+  type Attrs,
+  countDropped,
+  type Log,
+  limited,
+  MAX_LOGS,
+  micros,
+  newId,
+  type Span,
+  type Trace,
+} from "./model.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, origin } from "./stack.js";
 
@@ -196,7 +206,7 @@ export class TracepanelProcessor implements SpanProcessor {
     setTimeout(() => {
       this.close(building);
       this.finish(building, span);
-      this.sink.submit(building.trace);
+      this.sink.submit(limited(building.trace));
     }, LATE_SPANS_MS).unref();
   }
 
@@ -277,7 +287,10 @@ export class TracepanelProcessor implements SpanProcessor {
 
   addLog(log: Omit<Log, "span_id">): void {
     const current = this.current();
-    current?.building.trace.logs.push({ ...log, span_id: current.spanId });
+    if (!current) return;
+    const { trace } = current.building;
+    if (trace.logs.length >= MAX_LOGS) countDropped(trace, "tracepanel.dropped_logs");
+    else trace.logs.push({ ...log, span_id: current.spanId });
   }
 
   /** The framework the active request runs on, unless a more specific one (Nest on Express) already said so. */
