@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import type { Config } from "./config.js";
+import { type ExplainRequest, explain } from "./explain.js";
 import type { Trace } from "./model.js";
 
 const PROTOCOL = 1;
@@ -212,19 +213,31 @@ export class Sender {
       socket.once("error", fail);
       socket.once("connect", () => {
         // The agent finds the issues with this project's limits.
-        const hello = { protocol: PROTOCOL, max_traces: this.config.maxTraces, thresholds: this.config.thresholds };
+        // It can EXPLAIN a query on the app's database for the console.
+        const hello = {
+          protocol: PROTOCOL,
+          max_traces: this.config.maxTraces,
+          thresholds: this.config.thresholds,
+          service: this.config.service,
+          capabilities: ["explain"],
+        };
         socket.write(`${JSON.stringify(hello)}\n`);
       });
-      let answer = "";
-      socket.on("data", function onData(chunk) {
-        answer += chunk.toString("utf8");
-        if (!answer.includes("\n")) return;
+      let received = Buffer.alloc(0);
+      socket.on("data", function onData(chunk: Buffer) {
+        received = Buffer.concat([received, chunk]);
+        const newline = received.indexOf(10);
+        if (newline < 0) return;
         socket.off("data", onData);
         socket.setTimeout(0);
         socket.removeListener("error", fail);
-        const reply = JSON.parse(answer.slice(0, answer.indexOf("\n"))) as { ok: boolean; error?: string };
-        if (reply.ok) done(socket);
-        else {
+        const reply = JSON.parse(received.subarray(0, newline).toString("utf8")) as { ok: boolean; error?: string };
+        if (reply.ok) {
+          // The agent's requests come down the same connection, a frame each (EXPLAIN on the app's database): what
+          // came with the answer is the start of the first.
+          readFrames(socket, received.subarray(newline + 1), (request) => void answer(socket, request));
+          done(socket);
+        } else {
           warn(`the agent refused: ${reply.error}`);
           fail();
         }
@@ -236,4 +249,45 @@ export class Sender {
 function hostPort(value: string): { host: string; port: number } {
   const at = value.lastIndexOf(":");
   return { host: value.slice(0, at).replace(/^\[|\]$/g, ""), port: Number(value.slice(at + 1)) };
+}
+
+/** Calls `onFrame` with each length-prefixed JSON frame the agent sends after the hello. */
+/** What the agent asks of the app: an EXPLAIN, under the id its answer carries back. */
+interface AgentRequest {
+  id?: unknown;
+  explain?: ExplainRequest;
+}
+
+function readFrames(socket: Socket, start: Buffer, onFrame: (frame: AgentRequest) => void): void {
+  let pending = Buffer.alloc(0);
+  const read = (chunk: Buffer) => {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 4 && pending.length >= 4 + pending.readUInt32BE(0)) {
+      const length = pending.readUInt32BE(0);
+      const body = pending.subarray(4, 4 + length).toString("utf8");
+      pending = pending.subarray(4 + length);
+      try {
+        onFrame(JSON.parse(body) as AgentRequest);
+      } catch {
+        // A frame this SDK can't read: the agent times its request out.
+      }
+    }
+  };
+  socket.on("data", read);
+  read(start);
+}
+
+/** The agent's request run, and its answer sent back up: the rows, or what went wrong. */
+async function answer(socket: Socket, request: AgentRequest): Promise<void> {
+  if (!request.explain) return;
+  let reply: Record<string, unknown>;
+  try {
+    reply = { answer: request.id, ...(await explain(request.explain)) };
+  } catch (error) {
+    reply = { answer: request.id, error: error instanceof Error ? error.message : String(error) };
+  }
+  const data = Buffer.from(JSON.stringify(reply));
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  if (!socket.destroyed) socket.write(Buffer.concat([length, data]));
 }

@@ -19,6 +19,7 @@ import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-middle/register-hooks.mjs";
 import { BullMQInstrumentation } from "./bullmq.js";
 import { captureConsole } from "./console.js";
+import { DatabasesInstrumentation } from "./explain.js";
 import { NestLogs } from "./logs.js";
 import { type Runtime, runtime } from "./runtime.js";
 
@@ -91,6 +92,8 @@ export function start(options: Options = {}): Runtime | undefined {
     new MongoDBInstrumentation({ enhancedDatabaseReporting: true }),
     new PrismaInstrumentation(),
     new BullMQInstrumentation(),
+    // The databases the app queries, for the console's EXPLAIN.
+    new DatabasesInstrumentation(),
     // fetch(): Node's own, through undici.
     new UndiciInstrumentation(),
     // Outgoing calls through node:http (axios, got) always; the server's requests unless the framework traces them.

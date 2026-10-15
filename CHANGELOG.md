@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- EXPLAIN of a query from the console: the app says it can in its hello,
+  and runs the EXPLAIN the agent sends down the connection on a session of
+  its own, with the settings of its pg or mysql2 connection, rolled back.
+  pg's parameters are recorded with the query (`db.params`) for it.
+
 ### Fixed
 
 - A trace keeps at most 2,000 spans and 1,000 log records, as the agent
