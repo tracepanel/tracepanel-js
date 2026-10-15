@@ -78,3 +78,34 @@ export function newId(now: number = Date.now()): string {
 export function micros(ms: number): number {
   return Math.round(ms * 1000);
 }
+
+/** The most spans a trace is sent with, as the agent stores it; the rest are counted (`tracepanel.dropped_spans`). */
+export const MAX_SPANS = 2000;
+/** The most log records a trace keeps; the rest are counted (`tracepanel.dropped_logs`). */
+export const MAX_LOGS = 1000;
+
+/** Adds `count` to a trace's tally of what went unrecorded. */
+export function countDropped(
+  trace: Trace,
+  key: "tracepanel.dropped_spans" | "tracepanel.dropped_logs",
+  count = 1,
+): void {
+  trace.attrs[key] = Number(trace.attrs[key] ?? 0) + count;
+}
+
+/**
+ * The trace cut to MAX_SPANS: its earliest spans, its roots always. Spans end children first, so a cut as they end
+ * would keep children whose parent went: by start, a parent always comes before its children.
+ */
+export function limited(trace: Trace): Trace {
+  if (trace.spans.length <= MAX_SPANS) return trace;
+  const ranked = trace.spans
+    .map((span, index) => ({ span, index }))
+    .sort(
+      (a, b) => Number(a.span.parent_id !== null) - Number(b.span.parent_id !== null) || a.span.start - b.span.start,
+    );
+  const kept = new Set(ranked.slice(0, MAX_SPANS).map(({ index }) => index));
+  countDropped(trace, "tracepanel.dropped_spans", trace.spans.length - kept.size);
+  trace.spans = trace.spans.filter((_, index) => kept.has(index));
+  return trace;
+}

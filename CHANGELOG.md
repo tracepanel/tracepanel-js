@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A trace keeps at most 2,000 spans and 1,000 log records, as the agent
+  stores it: its earliest spans, each with its parent, and its first
+  records. How many went is counted (`tracepanel.dropped_spans`, `_logs`),
+  and one runaway request no longer grows the app's memory without end.
+
 ## 0.2.0 (2026-10-14)
 
 The first release on npm. It needs `@tracepanel/agent` 0.2.0, installed with
