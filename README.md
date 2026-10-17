@@ -216,9 +216,13 @@ page's, such as a dev server's client.
 - SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
   Prisma's driver adapters), with the line of your code that ran each
   statement. Prisma's operations show as steps.
+- Transactions: BEGIN … COMMIT (or ROLLBACK) on a `pg` client or a `mysql2`
+  connection, with its statements and the calls made inside it, and its
+  savepoints.
 - Redis commands (`ioredis`, `redis`) and MongoDB commands, with their own
   N+1 and duplicates.
-- Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios.
+- Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios, on
+  Node and on Bun.
 - BullMQ: each job a worker runs is a task, each job the app adds a step.
 - `console` calls made during a request, and Nest's `Logger`.
 - Errors thrown in a handler, with your frames and their source.
@@ -239,6 +243,20 @@ await trace("nightly cleanup", async () => {
 request it is a step. `span()` is a step of the current trace. Outside
 development they run the function and nothing else. Run a script with
 `npx tracepanel run node script.js`.
+
+## The signed-in user
+
+```js
+import { setUser } from "@tracepanel/js";
+
+setUser({ id: customer.id, username: customer.email });
+```
+
+Call `setUser()` where the app knows who is signed in, such as its auth
+middleware. The request's trace gets `user.id`, and `user.username` and
+`user.email` when given, as the Python SDK records them. `setUser(null)`
+marks a request nobody signed in to. The username and email stay on your
+machine. Outside a trace it does nothing.
 
 ## Settings
 

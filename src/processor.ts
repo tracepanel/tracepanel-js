@@ -6,6 +6,7 @@ import { type Context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/ap
 import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
+import { CALL_ORIGIN } from "./fetch.js";
 import { withVersion } from "./frameworks.js";
 import {
   type Attrs,
@@ -20,6 +21,7 @@ import {
 } from "./model.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, origin } from "./stack.js";
+import { CONTROL } from "./transactions.js";
 
 /** Where a trace goes once its request ends. */
 export interface Sink {
@@ -53,6 +55,10 @@ interface Building {
   replaced: Set<string>;
   /** OTel span id: the Express route handlers' ones, so a Nest span under one can take its place. */
   expressHandlers: Set<string>;
+  /** OTel span ids of transaction and savepoint spans. */
+  transactions: Set<string>;
+  /** OTel span id → the app's line behind a span that is left out, for the span it stands over (Next's fetch). */
+  passedOrigins: Map<string, string | null>;
   /**
    * The app's line behind the latest span that had one. A driver often starts its query span later, from a callback
    * (pg's pool runs the query once it has a connection), where the stack holds none of the app's code; the
@@ -82,6 +88,8 @@ const SKIPPED_NEXT = new Set([
   "LoadComponents.loadRouteModule",
   "RouteModule.prepare",
   "ResolveMetadata.generateMetadata",
+  // Next's own span of a fetch(): undici's under it is the call, with the traceparent the callee got.
+  "AppRender.fetch",
 ]);
 // What runs a Next.js route: an app or pages render, a route handler, getServerSideProps.
 const NEXT_HANDLERS = new Set([
@@ -146,7 +154,7 @@ export class TracepanelProcessor implements SpanProcessor {
     private readonly sink: Sink,
   ) {}
 
-  onStart(span: SdkSpan, _parentContext: Context): void {
+  onStart(span: SdkSpan, parentContext: Context): void {
     const context = span.spanContext();
     const parent = span.parentSpanContext;
     let building = parent ? this.owner.get(parent.spanId) : undefined;
@@ -172,11 +180,13 @@ export class TracepanelProcessor implements SpanProcessor {
     this.owner.set(context.spanId, building);
     const found = origin(this.config.root);
     if (found) building.lastOrigin = found;
+    const attrs = attrsOf(span);
     if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
+      building.passedOrigins.set(context.spanId, found ?? building.passedOrigins.get(parent.spanId) ?? null);
       return;
     }
-    const attrs = attrsOf(span);
+    if (attrs["tracepanel.span_kind"] === "transaction") building.transactions.add(context.spanId);
     if (attrs["express.type"] === "request_handler") building.expressHandlers.add(context.spanId);
     if (parent && attrs["nestjs.type"] === "request_context" && building.expressHandlers.has(parent.spanId)) {
       // Nest's router is Express's route handler: the controller's span takes its place in the tree.
@@ -187,7 +197,12 @@ export class TracepanelProcessor implements SpanProcessor {
     building.parents.set(context.spanId, parent && !local ? (building.ids.get(parent.spanId) ?? null) : null);
     if (!parent && attrs["next.span_type"] === "BaseServer.handleRequest") building.framework = "Next.js";
     building.ids.set(context.spanId, newId());
-    building.origins.set(context.spanId, found ?? building.lastOrigin);
+    // A span started outside the app's code (undici's, under Next's fetch span) is the call the app made there.
+    // So is one a call made from its context, which took the app's line as the app called it (fetch()).
+    const passed =
+      (parent ? building.passedOrigins.get(parent.spanId) : undefined) ??
+      (parentContext.getValue(CALL_ORIGIN) as string | undefined);
+    building.origins.set(context.spanId, found ?? passed ?? building.lastOrigin);
   }
 
   onEnd(span: ReadableSpan): void {
@@ -201,13 +216,22 @@ export class TracepanelProcessor implements SpanProcessor {
     if (!building) return;
     const root = context.spanId === building.rootSpanId;
     if (building.replaced.has(context.spanId)) return;
-    if (root || !skipped(span)) this.convert(building, span, root);
+    if (root || !(skipped(span) || this.control(building, span))) this.convert(building, span, root);
     if (!root) return;
     setTimeout(() => {
       this.close(building);
       this.finish(building, span);
       this.sink.submit(limited(building.trace));
     }, LATE_SPANS_MS).unref();
+  }
+
+  /**
+   * BEGIN, COMMIT and the like in a transaction span, which stands for them. Told as the span ends: the pg
+   * instrumentation sets the statement after it starts.
+   */
+  private control(building: Building, span: ReadableSpan): boolean {
+    const parent = span.parentSpanContext?.spanId;
+    return parent !== undefined && building.transactions.has(parent) && CONTROL.test(statementOf(attrsOf(span)));
   }
 
   forceFlush(): Promise<void> {
@@ -305,6 +329,12 @@ export class TracepanelProcessor implements SpanProcessor {
     if (current) current.building.route = route;
   }
 
+  /** Attributes of the active request's trace: the signed-in user (setUser()). */
+  setTraceAttrs(attrs: Attrs): void {
+    const current = this.current();
+    if (current) Object.assign(current.building.trace.attrs, attrs);
+  }
+
   /** The framework the active request ran on, as the panel shows it. */
   framework(): string | undefined {
     return this.current()?.building.framework;
@@ -339,6 +369,8 @@ export class TracepanelProcessor implements SpanProcessor {
       replaced: new Set(),
       nestViews: new Set(),
       expressHandlers: new Set(),
+      transactions: new Set(),
+      passedOrigins: new Map(),
       parents: new Map(),
       lastOrigin: null,
     };
@@ -386,6 +418,10 @@ export class TracepanelProcessor implements SpanProcessor {
         ...Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("task."))),
         "code.origin": codeOrigin,
       };
+    } else if (attrs["tracepanel.span_kind"] === "transaction") {
+      converted.kind = "transaction";
+      const { "tracepanel.span_kind": _, ...own } = attrs;
+      converted.attrs = { ...own, "code.origin": codeOrigin };
     } else if (isRedis(attrs)) {
       const call = redisCall(attrs, span.name);
       converted.kind = "redis";

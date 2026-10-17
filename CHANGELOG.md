@@ -2,11 +2,42 @@
 
 ## Unreleased
 
+### Added
+
+- Transactions: BEGIN (or START TRANSACTION) on a pg client or a mysql2
+  connection opens a `transaction` span that its COMMIT or ROLLBACK ends,
+  with a nested `savepoint` span for each SAVEPOINT. The statements on that
+  connection and the calls made meanwhile go inside it, so the agent finds
+  long transactions and HTTP calls inside one, as it does for Python.
+- `setUser({ id, username, email })` names the signed-in user on the
+  request's trace (`user.id`, `user.username`, `user.email`), as the Python
+  SDK does for Django's user.
+
 ### Changed
 
 - Installs any `@tracepanel/agent` 0.3 from 0.3.1 on (`~0.3.1`), rather
   than exactly its own version. A minor version is still released together
   with the agent's. A patch of either now comes out on its own.
+
+### Fixed
+
+- Next.js: a `fetch()` is one `http.client` span, not two. Next's own
+  span of it made a second one, which the agent could take for a
+  duplicate call.
+- `code.origin` of a `fetch()` is the line that called it. Node's undici
+  starts the call's span away from the app's code, and it took the line of
+  the span before. A span under a deep stack of the driver's own (a query
+  inside a transaction) finds the app's line too.
+- `next dev` and `nuxt dev`: `code.origin` and an error's frames point at
+  the app's source, not at the dev server's bundle
+  (`.next/dev/server/chunks/*.js`, `.nuxt/dev/index.mjs`). A frame in a
+  file with a source map is read through it, and the dependencies bundled
+  with the app are not the app's code.
+- Bun: `fetch()` and `node:http` calls are `http.client` spans with the
+  same attributes as on Node, and send their W3C traceparent. Under
+  `bun --preload @tracepanel/js/register` neither made a span before. A
+  request to `serve()` or `withTracepanel()` reads the caller's
+  traceparent, so the agent links the two traces.
 
 ## 0.3.1 (2026-10-17)
 

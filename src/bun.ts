@@ -6,7 +6,7 @@
 //
 // Start the app with `bun --preload @tracepanel/js/register server.ts` so the database driver is hooked as it loads.
 
-import { SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
 import { exposedHeaders, inject } from "./widget.js";
@@ -40,7 +40,13 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
       ...(route ? { "http.route": route } : {}),
     };
     const startedMs = performance.now();
-    return tracer.startActiveSpan(`${request.method}`, { kind: SpanKind.SERVER, attributes }, async (span) => {
+    // The caller's traceparent, as Node's http instrumentation reads it: the agent links the caller's trace to this.
+    const caller = propagation.extract(ROOT_CONTEXT, request.headers, {
+      get: (headers, key) => headers.get(key) ?? undefined,
+      keys: (headers) => [...headers.keys()],
+    });
+    const options = { kind: SpanKind.SERVER, attributes };
+    return tracer.startActiveSpan(`${request.method}`, options, caller, async (span) => {
       tracepanel.processor.setFramework("Bun.serve");
       try {
         let response: Response;
