@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 (2026-10-17)
+
+### Fixed
+
+- EXPLAIN from the console works on the queries of a Nuxt app. Nitro's dev
+  server imports pg by its ES module's file URL, and the hook that remembers
+  the app's databases never saw it load. EXPLAIN then had no database, or ran
+  on another one the app had queried. pg and mysql2 handed over as an ES
+  module's namespace were missed the same way.
+
 ## 0.3.2 (2026-10-17)
 
 ### Added
