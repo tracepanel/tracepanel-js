@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Installs any `@tracepanel/agent` 0.3 from 0.3.1 on (`~0.3.1`), rather
+  than exactly its own version. A minor version is still released together
+  with the agent's. A patch of either now comes out on its own.
+
 ## 0.3.1 (2026-10-17)
 
 It needs `@tracepanel/agent` 0.3.1, installed with it: its console's script
