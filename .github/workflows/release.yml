@@ -56,15 +56,18 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: npm with trusted publishing (11.5.1 or later)
         run: npm install --global npm@^11.15.0
-      - name: The tag is the version, and the agent's
+      # A minor is released with the agent's, a patch on its own: the agent is pinned to this version's minor (~0.3.1).
+      - name: The tag is the version, and the agent's pin is its minor
         run: |
           node --input-type=module <<'EOF'
           import { readFileSync } from "node:fs";
           const pkg = JSON.parse(readFileSync("package.json", "utf8"));
           const tag = process.env.GITHUB_REF_NAME;
           const agent = pkg.dependencies["@tracepanel/agent"];
-          if (pkg.version !== tag || agent !== tag) {
-            console.log(`::error::tag ${tag}, version ${pkg.version}, agent ${agent}: they must agree`);
+          const minor = (version) => version.split(".").slice(0, 2).join(".");
+          const pinned = /^~(\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?)$/.exec(agent);
+          if (pkg.version !== tag || !pinned || minor(pinned[1]) !== minor(tag)) {
+            console.log(`::error::tag ${tag}, version ${pkg.version}, agent ${agent}: the tag must be the version, the agent ~${minor(tag)}.N`);
             process.exit(1);
           }
           EOF
