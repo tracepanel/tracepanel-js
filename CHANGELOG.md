@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 (2026-10-17)
+
+It needs `@tracepanel/agent` 0.3.1, installed with it: its console's script
+is a fifth smaller, and the source around an error's frame is highlighted
+in JavaScript, TypeScript, Java and Kotlin too.
+
+### Changed
+
+- Installs `@tracepanel/agent` 0.3.1.
+
 ## 0.3.0 (2026-10-15)
 
 It needs `@tracepanel/agent` 0.3.0, installed with it: its console finds
