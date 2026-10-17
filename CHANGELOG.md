@@ -30,6 +30,11 @@
   (`.next/dev/server/chunks/*.js`, `.nuxt/dev/index.mjs`). A frame in a
   file with a source map is read through it, and the dependencies bundled
   with the app are not the app's code.
+- Bun: `fetch()` and `node:http` calls are `http.client` spans with the
+  same attributes as on Node, and send their W3C traceparent. Under
+  `bun --preload @tracepanel/js/register` neither made a span before. A
+  request to `serve()` or `withTracepanel()` reads the caller's
+  traceparent, so the agent links the two traces.
 
 ## 0.3.1 (2026-10-17)
 

@@ -221,7 +221,8 @@ page's, such as a dev server's client.
   savepoints.
 - Redis commands (`ioredis`, `redis`) and MongoDB commands, with their own
   N+1 and duplicates.
-- Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios.
+- Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios, on
+  Node and on Bun.
 - BullMQ: each job a worker runs is a task, each job the app adds a step.
 - `console` calls made during a request, and Nest's `Logger`.
 - Errors thrown in a handler, with your frames and their source.

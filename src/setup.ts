@@ -22,6 +22,7 @@ import { captureConsole } from "./console.js";
 import { DatabasesInstrumentation } from "./explain.js";
 import { traceFetch } from "./fetch.js";
 import { NestLogs } from "./logs.js";
+import { traceBunCalls } from "./outgoing.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { TransactionsInstrumentation } from "./transactions.js";
 
@@ -81,6 +82,7 @@ export function start(options: Options = {}): Runtime | undefined {
   if (supportsSyncHooks() && typeof nodeModule.registerHooks === "function") registerSyncHooks();
   else register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
   new NodeTracerProvider({ spanProcessors: [tracepanel.processor] }).register();
+  const bun = process.versions.bun !== undefined;
   const instrumentations: Instrumentation[] = [
     new ExpressInstrumentation(),
     // A Nest app runs on Express: Nest's spans name the controller and method that handled the request.
@@ -98,10 +100,12 @@ export function start(options: Options = {}): Runtime | undefined {
     new BullMQInstrumentation(),
     // The databases the app queries, for the console's EXPLAIN.
     new DatabasesInstrumentation(),
-    // fetch(): Node's own, through undici.
-    new UndiciInstrumentation(),
+    // fetch(): Node's own, through undici (Bun's: traceBunCalls() below).
+    ...(bun ? [] : [new UndiciInstrumentation()]),
     // Outgoing calls through node:http (axios, got) always; the server's requests unless the framework traces them.
     new HttpInstrumentation({
+      // Bun's node:http calls are traceBunCalls()'s.
+      ignoreOutgoingRequestHook: () => bun,
       // A CORS preflight (the browser asking before a call with a traceparent) is the browser's, not the app's work.
       ignoreIncomingRequestHook: (request) =>
         options.httpServer === false ||
@@ -109,8 +113,10 @@ export function start(options: Options = {}): Runtime | undefined {
     }),
   ];
   registerInstrumentations({ instrumentations });
-  // fetch() takes the app's line as it is called: undici starts its span later, away from the app's code.
-  traceFetch(tracepanel.config.root);
+  // fetch() takes the app's line as it is called: undici starts its span later, away from the app's code. Bun's
+  // fetch and node:http have no instrumentation that sees them: their calls are traced here.
+  if (bun) traceBunCalls();
+  else traceFetch(tracepanel.config.root);
   captureConsole(tracepanel.processor);
   return tracepanel;
 }
