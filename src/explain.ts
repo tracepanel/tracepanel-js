@@ -5,7 +5,12 @@
 // its settings (the password among them), and EXPLAIN opens one of its own with them, so it never runs inside the
 // app's transaction. Whatever EXPLAIN ANALYZE does is rolled back.
 
-import { InstrumentationBase, InstrumentationNodeModuleDefinition } from "@opentelemetry/instrumentation";
+import {
+  InstrumentationBase,
+  InstrumentationNodeModuleDefinition,
+  InstrumentationNodeModuleFile,
+} from "@opentelemetry/instrumentation";
+import { commonJs } from "./transactions.js";
 
 /** What the agent asks: the EXPLAIN to run, its parameters, and which database (the span's). */
 export interface ExplainRequest {
@@ -73,6 +78,9 @@ export async function explain(request: ExplainRequest): Promise<ExplainAnswer> {
 type Any = any;
 const MARK = Symbol.for("tracepanel.explain");
 
+/** Nothing to undo: the watchers stay, and only note connections. */
+const keep = (exports: Any) => exports;
+
 /** Records pg's and mysql2's connections as they query: where they are, and their settings. */
 export class DatabasesInstrumentation extends InstrumentationBase {
   constructor() {
@@ -81,12 +89,32 @@ export class DatabasesInstrumentation extends InstrumentationBase {
 
   protected init() {
     return [
-      new InstrumentationNodeModuleDefinition("pg", [">=8"], (exports: Any) => {
-        this.watch(exports.Client?.prototype, (client: Any) => rememberPg(client));
-        return exports;
-      }),
+      new InstrumentationNodeModuleDefinition(
+        "pg",
+        [">=8"],
+        (exports: Any) => {
+          this.watch(commonJs(exports)?.Client?.prototype, (client: Any) => rememberPg(client));
+          return exports;
+        },
+        keep,
+        [
+          // pg imported by its ES module's file URL (Nitro's dev server) loads without the hook above: its client
+          // class is watched as it loads, once the file's other hooks are done.
+          new InstrumentationNodeModuleFile(
+            "pg/lib/client.js",
+            [">=8"],
+            (exports: Any) => {
+              const proto = commonJs(exports)?.prototype;
+              queueMicrotask(() => this.watch(proto, (client: Any) => rememberPg(client)));
+              return exports;
+            },
+            keep,
+          ),
+        ],
+      ),
       new InstrumentationNodeModuleDefinition("mysql2", [">=3"], (exports: Any) => {
-        this.watch(exports.Connection?.prototype, (client: Any) => rememberMysql(client, exports));
+        const mysql2 = commonJs(exports);
+        this.watch(mysql2?.Connection?.prototype, (client: Any) => rememberMysql(client, mysql2));
         return exports;
       }),
     ];

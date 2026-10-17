@@ -199,7 +199,7 @@ export function wrapRelease(proto: Any, method: string, connectionOf: (self: Any
 }
 
 /** A CommonJS module's exports, also when an ES module loader hands over its namespace. */
-function commonJs(exports: Any): Any {
+export function commonJs(exports: Any): Any {
   return exports?.[Symbol.toStringTag] === "Module" ? exports.default : exports;
 }
 

@@ -4,7 +4,7 @@ import { createServer, type Socket } from "node:net";
 import { afterEach, expect, test } from "vitest";
 import { Sender, Starter } from "../src/agent.js";
 import { loadConfig } from "../src/config.js";
-import { DatabasesInstrumentation } from "../src/explain.js";
+import { DatabasesInstrumentation, explain } from "../src/explain.js";
 import type { Trace } from "../src/model.js";
 
 /** pg's Client as far as the SDK uses it: its settings, and every statement each instance ran. */
@@ -35,6 +35,18 @@ class FakeClient {
   }
 
   async end(): Promise<void> {}
+}
+
+// pg's own query, before any test's instrumentation wraps FakeClient's.
+const plainQuery = FakeClient.prototype.query;
+
+/** A Client class no instrumentation has seen: an app that loads pg in another way than the first test. */
+function freshClient(): typeof FakeClient {
+  return class extends FakeClient {
+    override query(query: { text: string; values?: unknown[] } | string): Promise<unknown> {
+      return plainQuery.call(this, query);
+    }
+  };
 }
 
 /** One frame: a 4-byte big-endian length, then JSON. */
@@ -118,4 +130,42 @@ test("the agent's EXPLAIN runs on a session of the app's database, rolled back, 
 const after: (() => void)[] = [];
 afterEach(() => {
   for (const close of after.splice(0)) close();
+});
+
+test("pg loaded by its ES module's file URL is a database EXPLAIN can run on", async () => {
+  // Nitro's dev server imports pg's client file by its URL: the module-level hook never sees it.
+  const instrumentation = new DatabasesInstrumentation();
+  const [pg] = instrumentation.getModuleDefinitions();
+  const [client] = pg?.files ?? [];
+  const Client = freshClient();
+  client?.patch({ default: Client, [Symbol.toStringTag]: "Module" }, "8.13.0");
+  // The client is wrapped once the file's other hooks are done.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const settings = { host: "nitro-db", port: 5432, database: "store", user: "shop", password: "secret" };
+  await (new Client(settings) as unknown as { query(sql: string): Promise<unknown> }).query("SELECT 1");
+
+  const answer = await explain({ sql: "EXPLAIN SELECT 1", params: [], vendor: "postgresql", server: "nitro-db" });
+
+  expect(answer).toEqual({ columns: ["QUERY PLAN"], rows: [["Seq Scan on books"]] });
+  expect(FakeClient.ran.map((ran) => [ran.config["host"], ran.sql])).toEqual([
+    ["nitro-db", "SELECT 1"],
+    ["nitro-db", "BEGIN"],
+    ["nitro-db", "EXPLAIN SELECT 1"],
+    ["nitro-db", "ROLLBACK"],
+  ]);
+});
+
+test("pg handed over as an ES module's namespace is a database EXPLAIN can run on", async () => {
+  const instrumentation = new DatabasesInstrumentation();
+  const [pg] = instrumentation.getModuleDefinitions();
+  const Client = freshClient();
+  pg?.patch?.({ default: { Client }, [Symbol.toStringTag]: "Module" }, "8.13.0");
+  const settings = { host: "esm-db", port: 5432, database: "store", user: "shop", password: "secret" };
+  await (new Client(settings) as unknown as { query(sql: string): Promise<unknown> }).query("SELECT 1");
+
+  const answer = await explain({ sql: "EXPLAIN SELECT 1", params: [], vendor: "postgresql", server: "esm-db" });
+
+  expect(answer).toEqual({ columns: ["QUERY PLAN"], rows: [["Seq Scan on books"]] });
+  // On that database, not on another one the app queried.
+  expect(FakeClient.ran.map((ran) => ran.config["host"])).toEqual(["esm-db", "esm-db", "esm-db", "esm-db"]);
 });
