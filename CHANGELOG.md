@@ -9,6 +9,9 @@
   with a nested `savepoint` span for each SAVEPOINT. The statements on that
   connection and the calls made meanwhile go inside it, so the agent finds
   long transactions and HTTP calls inside one, as it does for Python.
+- `setUser({ id, username, email })` names the signed-in user on the
+  request's trace (`user.id`, `user.username`, `user.email`), as the Python
+  SDK does for Django's user.
 
 ### Changed
 

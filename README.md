@@ -244,6 +244,20 @@ request it is a step. `span()` is a step of the current trace. Outside
 development they run the function and nothing else. Run a script with
 `npx tracepanel run node script.js`.
 
+## The signed-in user
+
+```js
+import { setUser } from "@tracepanel/js";
+
+setUser({ id: customer.id, username: customer.email });
+```
+
+Call `setUser()` where the app knows who is signed in, such as its auth
+middleware. The request's trace gets `user.id`, and `user.username` and
+`user.email` when given, as the Python SDK records them. `setUser(null)`
+marks a request nobody signed in to. The username and email stay on your
+machine. Outside a trace it does nothing.
+
 ## Settings
 
 Environment variables, as in the Python SDK:

@@ -329,6 +329,12 @@ export class TracepanelProcessor implements SpanProcessor {
     if (current) current.building.route = route;
   }
 
+  /** Attributes of the active request's trace: the signed-in user (setUser()). */
+  setTraceAttrs(attrs: Attrs): void {
+    const current = this.current();
+    if (current) Object.assign(current.building.trace.attrs, attrs);
+  }
+
   /** The framework the active request ran on, as the panel shows it. */
   framework(): string | undefined {
     return this.current()?.building.framework;
