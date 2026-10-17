@@ -25,6 +25,11 @@
   starts the call's span away from the app's code, and it took the line of
   the span before. A span under a deep stack of the driver's own (a query
   inside a transaction) finds the app's line too.
+- `next dev` and `nuxt dev`: `code.origin` and an error's frames point at
+  the app's source, not at the dev server's bundle
+  (`.next/dev/server/chunks/*.js`, `.nuxt/dev/index.mjs`). A frame in a
+  file with a source map is read through it, and the dependencies bundled
+  with the app are not the app's code.
 
 ## 0.3.1 (2026-10-17)
 
