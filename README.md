@@ -216,6 +216,9 @@ page's, such as a dev server's client.
 - SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
   Prisma's driver adapters), with the line of your code that ran each
   statement. Prisma's operations show as steps.
+- Transactions: BEGIN … COMMIT (or ROLLBACK) on a `pg` client or a `mysql2`
+  connection, with its statements and the calls made inside it, and its
+  savepoints.
 - Redis commands (`ioredis`, `redis`) and MongoDB commands, with their own
   N+1 and duplicates.
 - Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios.

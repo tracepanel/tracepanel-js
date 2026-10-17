@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Transactions: BEGIN (or START TRANSACTION) on a pg client or a mysql2
+  connection opens a `transaction` span that its COMMIT or ROLLBACK ends,
+  with a nested `savepoint` span for each SAVEPOINT. The statements on that
+  connection and the calls made meanwhile go inside it, so the agent finds
+  long transactions and HTTP calls inside one, as it does for Python.
+
 ### Changed
 
 - Installs any `@tracepanel/agent` 0.3 from 0.3.1 on (`~0.3.1`), rather

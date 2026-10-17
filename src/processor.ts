@@ -20,6 +20,7 @@ import {
 } from "./model.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, origin } from "./stack.js";
+import { CONTROL } from "./transactions.js";
 
 /** Where a trace goes once its request ends. */
 export interface Sink {
@@ -53,6 +54,8 @@ interface Building {
   replaced: Set<string>;
   /** OTel span id: the Express route handlers' ones, so a Nest span under one can take its place. */
   expressHandlers: Set<string>;
+  /** OTel span ids of transaction and savepoint spans. */
+  transactions: Set<string>;
   /**
    * The app's line behind the latest span that had one. A driver often starts its query span later, from a callback
    * (pg's pool runs the query once it has a connection), where the stack holds none of the app's code; the
@@ -172,11 +175,12 @@ export class TracepanelProcessor implements SpanProcessor {
     this.owner.set(context.spanId, building);
     const found = origin(this.config.root);
     if (found) building.lastOrigin = found;
+    const attrs = attrsOf(span);
     if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
       return;
     }
-    const attrs = attrsOf(span);
+    if (attrs["tracepanel.span_kind"] === "transaction") building.transactions.add(context.spanId);
     if (attrs["express.type"] === "request_handler") building.expressHandlers.add(context.spanId);
     if (parent && attrs["nestjs.type"] === "request_context" && building.expressHandlers.has(parent.spanId)) {
       // Nest's router is Express's route handler: the controller's span takes its place in the tree.
@@ -201,13 +205,22 @@ export class TracepanelProcessor implements SpanProcessor {
     if (!building) return;
     const root = context.spanId === building.rootSpanId;
     if (building.replaced.has(context.spanId)) return;
-    if (root || !skipped(span)) this.convert(building, span, root);
+    if (root || !(skipped(span) || this.control(building, span))) this.convert(building, span, root);
     if (!root) return;
     setTimeout(() => {
       this.close(building);
       this.finish(building, span);
       this.sink.submit(limited(building.trace));
     }, LATE_SPANS_MS).unref();
+  }
+
+  /**
+   * BEGIN, COMMIT and the like in a transaction span, which stands for them. Told as the span ends: the pg
+   * instrumentation sets the statement after it starts.
+   */
+  private control(building: Building, span: ReadableSpan): boolean {
+    const parent = span.parentSpanContext?.spanId;
+    return parent !== undefined && building.transactions.has(parent) && CONTROL.test(statementOf(attrsOf(span)));
   }
 
   forceFlush(): Promise<void> {
@@ -339,6 +352,7 @@ export class TracepanelProcessor implements SpanProcessor {
       replaced: new Set(),
       nestViews: new Set(),
       expressHandlers: new Set(),
+      transactions: new Set(),
       parents: new Map(),
       lastOrigin: null,
     };
@@ -386,6 +400,10 @@ export class TracepanelProcessor implements SpanProcessor {
         ...Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("task."))),
         "code.origin": codeOrigin,
       };
+    } else if (attrs["tracepanel.span_kind"] === "transaction") {
+      converted.kind = "transaction";
+      const { "tracepanel.span_kind": _, ...own } = attrs;
+      converted.attrs = { ...own, "code.origin": codeOrigin };
     } else if (isRedis(attrs)) {
       const call = redisCall(attrs, span.name);
       converted.kind = "redis";

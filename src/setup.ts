@@ -22,6 +22,7 @@ import { captureConsole } from "./console.js";
 import { DatabasesInstrumentation } from "./explain.js";
 import { NestLogs } from "./logs.js";
 import { type Runtime, runtime } from "./runtime.js";
+import { TransactionsInstrumentation } from "./transactions.js";
 
 export interface Options {
   /**
@@ -91,6 +92,8 @@ export function start(options: Options = {}): Runtime | undefined {
     // The command with its values: Tracepanel keeps their shape and a hash, which tells duplicates from an N+1.
     new MongoDBInstrumentation({ enhancedDatabaseReporting: true }),
     new PrismaInstrumentation(),
+    // BEGIN … COMMIT on a connection as a transaction span: after pg's and mysql2's, so its statements are inside.
+    new TransactionsInstrumentation(),
     new BullMQInstrumentation(),
     // The databases the app queries, for the console's EXPLAIN.
     new DatabasesInstrumentation(),
