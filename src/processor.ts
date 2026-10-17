@@ -56,6 +56,8 @@ interface Building {
   expressHandlers: Set<string>;
   /** OTel span ids of transaction and savepoint spans. */
   transactions: Set<string>;
+  /** OTel span id → the app's line behind a span that is left out, for the span it stands over (Next's fetch). */
+  passedOrigins: Map<string, string | null>;
   /**
    * The app's line behind the latest span that had one. A driver often starts its query span later, from a callback
    * (pg's pool runs the query once it has a connection), where the stack holds none of the app's code; the
@@ -85,6 +87,8 @@ const SKIPPED_NEXT = new Set([
   "LoadComponents.loadRouteModule",
   "RouteModule.prepare",
   "ResolveMetadata.generateMetadata",
+  // Next's own span of a fetch(): undici's under it is the call, with the traceparent the callee got.
+  "AppRender.fetch",
 ]);
 // What runs a Next.js route: an app or pages render, a route handler, getServerSideProps.
 const NEXT_HANDLERS = new Set([
@@ -178,6 +182,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const attrs = attrsOf(span);
     if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
+      building.passedOrigins.set(context.spanId, found ?? building.passedOrigins.get(parent.spanId) ?? null);
       return;
     }
     if (attrs["tracepanel.span_kind"] === "transaction") building.transactions.add(context.spanId);
@@ -191,7 +196,9 @@ export class TracepanelProcessor implements SpanProcessor {
     building.parents.set(context.spanId, parent && !local ? (building.ids.get(parent.spanId) ?? null) : null);
     if (!parent && attrs["next.span_type"] === "BaseServer.handleRequest") building.framework = "Next.js";
     building.ids.set(context.spanId, newId());
-    building.origins.set(context.spanId, found ?? building.lastOrigin);
+    // A span started outside the app's code (undici's, under Next's fetch span) is the call the app made there.
+    const passed = parent ? building.passedOrigins.get(parent.spanId) : undefined;
+    building.origins.set(context.spanId, found ?? passed ?? building.lastOrigin);
   }
 
   onEnd(span: ReadableSpan): void {
@@ -353,6 +360,7 @@ export class TracepanelProcessor implements SpanProcessor {
       nestViews: new Set(),
       expressHandlers: new Set(),
       transactions: new Set(),
+      passedOrigins: new Map(),
       parents: new Map(),
       lastOrigin: null,
     };

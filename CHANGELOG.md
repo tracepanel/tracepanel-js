@@ -16,6 +16,12 @@
   than exactly its own version. A minor version is still released together
   with the agent's. A patch of either now comes out on its own.
 
+### Fixed
+
+- Next.js: a `fetch()` is one `http.client` span, not two. Next's own
+  span of it made a second one, which the agent could take for a
+  duplicate call.
+
 ## 0.3.1 (2026-10-17)
 
 It needs `@tracepanel/agent` 0.3.1, installed with it: its console's script
