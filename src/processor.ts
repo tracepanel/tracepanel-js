@@ -6,6 +6,7 @@ import { type Context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/ap
 import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
+import { CALL_ORIGIN } from "./fetch.js";
 import { withVersion } from "./frameworks.js";
 import {
   type Attrs,
@@ -153,7 +154,7 @@ export class TracepanelProcessor implements SpanProcessor {
     private readonly sink: Sink,
   ) {}
 
-  onStart(span: SdkSpan, _parentContext: Context): void {
+  onStart(span: SdkSpan, parentContext: Context): void {
     const context = span.spanContext();
     const parent = span.parentSpanContext;
     let building = parent ? this.owner.get(parent.spanId) : undefined;
@@ -197,7 +198,10 @@ export class TracepanelProcessor implements SpanProcessor {
     if (!parent && attrs["next.span_type"] === "BaseServer.handleRequest") building.framework = "Next.js";
     building.ids.set(context.spanId, newId());
     // A span started outside the app's code (undici's, under Next's fetch span) is the call the app made there.
-    const passed = parent ? building.passedOrigins.get(parent.spanId) : undefined;
+    // So is one a call made from its context, which took the app's line as the app called it (fetch()).
+    const passed =
+      (parent ? building.passedOrigins.get(parent.spanId) : undefined) ??
+      (parentContext.getValue(CALL_ORIGIN) as string | undefined);
     building.origins.set(context.spanId, found ?? passed ?? building.lastOrigin);
   }
 

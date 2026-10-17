@@ -20,6 +20,7 @@ import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-
 import { BullMQInstrumentation } from "./bullmq.js";
 import { captureConsole } from "./console.js";
 import { DatabasesInstrumentation } from "./explain.js";
+import { traceFetch } from "./fetch.js";
 import { NestLogs } from "./logs.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { TransactionsInstrumentation } from "./transactions.js";
@@ -108,6 +109,8 @@ export function start(options: Options = {}): Runtime | undefined {
     }),
   ];
   registerInstrumentations({ instrumentations });
+  // fetch() takes the app's line as it is called: undici starts its span later, away from the app's code.
+  traceFetch(tracepanel.config.root);
   captureConsole(tracepanel.processor);
   return tracepanel;
 }

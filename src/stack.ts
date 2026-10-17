@@ -39,9 +39,24 @@ export function inApp(file: string, root: string): boolean {
   );
 }
 
+// How deep origin() looks: a driver's span starts under a dozen frames of its own, the instrumentation's and
+// Tracepanel's, more than V8's default 10.
+const ORIGIN_DEPTH = 64;
+
+/** The current stack, ORIGIN_DEPTH frames deep. */
+function deepStack(): string | undefined {
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = Math.max(limit, ORIGIN_DEPTH);
+  try {
+    return new Error().stack;
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+}
+
 /** `file:line in function` of the innermost frame of the app's own code on the current stack, or null. */
 export function origin(root: string): string | null {
-  const frame = parseStack(new Error().stack).find((candidate) => inApp(candidate.file, root));
+  const frame = parseStack(deepStack()).find((candidate) => inApp(candidate.file, root));
   return frame ? `${relative(root, frame.file)}:${frame.line} in ${shortName(frame.function)}` : null;
 }
 

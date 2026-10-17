@@ -21,6 +21,10 @@
 - Next.js: a `fetch()` is one `http.client` span, not two. Next's own
   span of it made a second one, which the agent could take for a
   duplicate call.
+- `code.origin` of a `fetch()` is the line that called it. Node's undici
+  starts the call's span away from the app's code, and it took the line of
+  the span before. A span under a deep stack of the driver's own (a query
+  inside a transaction) finds the app's line too.
 
 ## 0.3.1 (2026-10-17)
 

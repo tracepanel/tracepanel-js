@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { frames, inApp, parseStack } from "../src/stack.js";
+import { frames, inApp, origin, parseStack } from "../src/stack.js";
+import { underLibrary } from "./app/shop.js";
 
 const STACK = `Error: boom
     at listBooks (/app/src/books.js:12:9)
@@ -31,5 +33,15 @@ describe("stack", () => {
       ["/app/node_modules/express/lib/router.js", false],
       ["src/books.js", true],
     ]);
+  });
+
+  it("finds the app's line under a library's deep stack", () => {
+    const app = new URL("./app/", import.meta.url);
+    const deep = (depth: number): string | null => (depth === 0 ? origin(app.pathname.slice(0, -1)) : deep(depth - 1));
+    const lines = readFileSync(new URL("shop.ts", app), "utf8").split("\n");
+
+    expect(underLibrary(() => deep(30))).toBe(
+      `shop.ts:${lines.findIndex((text) => text.includes("// library")) + 1} in underLibrary`,
+    );
   });
 });
