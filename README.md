@@ -285,6 +285,14 @@ Environment variables, as in the Python SDK:
 | `tracepanel dev` | runs the agent in the foreground, with the console on http://127.0.0.1:8765/ |
 | `tracepanel mcp` | gives an AI coding agent your traces over MCP |
 
+## Documentation
+
+The documentation is at
+[tracepanel.dev/docs/javascript](https://tracepanel.dev/docs/javascript):
+installing, the integrations, the browser recording, settings and the command
+line. The panel, the console and the issues are the same in every framework,
+under [tracepanel.dev/docs](https://tracepanel.dev/docs).
+
 ## License
 
 Licensed under the [MIT License](LICENSE).

@@ -123,5 +123,5 @@
     "type": "git",
     "url": "git+https://github.com/tracepanel/tracepanel-js.git"
   },
-  "homepage": "https://tracepanel.dev"
+  "homepage": "https://tracepanel.dev/docs/javascript"
 }
