@@ -8,7 +8,8 @@
 //   import { record } from "@tracepanel/js/browser";
 //   record({ api: "/__tracepanel__/", service: "shop-web" });
 //
-// @tracepanel/js/vite's plugin loads it by itself. Nothing here runs outside a browser, and nothing imports Node.
+// @tracepanel/js/vite's plugin and Next.js's `<Tracepanel />` load it by themselves. Nothing here runs outside a
+// browser, and nothing imports Node.
 //
 // The page's widget shows them too: each view and action is announced on window ("tracepanel:page") when it starts
 // and when it ends, and each response carries the id of the one that made it (Symbol.for("tracepanel.page") on the
@@ -22,8 +23,8 @@ export interface BrowserOptions {
   /** Other origins whose calls carry a traceparent (their CORS must allow the header). */
   propagateTo?: string[];
   /**
-   * Scripts whose console isn't the page's, by path prefix: a dev server's own client ("/@vite/"). @tracepanel/js/vite
-   * sets Vite's; a library's warnings still count (React's, from /node_modules/).
+   * Scripts whose console isn't the page's, by a part of their path: a dev server's own client ("/@vite/").
+   * @tracepanel/js/vite and Next.js's `<Tracepanel />` set their own; a library's warnings still count (React's).
    */
   ignoreSources?: string[];
 }
@@ -203,11 +204,14 @@ function formName(form: HTMLFormElement): string {
   return action ? action.pathname : "form";
 }
 
-/** Where a console call came from: the first frame of the stack that isn't this script's own. */
+/**
+ * Where a console call came from: the first frame of the stack that isn't this script's own, nor another wrapper of
+ * console's methods (Next.js's dev overlay wraps them after the recording did: its frame reads `console.log`).
+ */
 function caller(stack: string | undefined, own: string | undefined): Frame | undefined {
   return frames(stack)
     .reverse()
-    .find((frame) => frame.filename !== own);
+    .find((frame) => frame.filename !== own && !/^console\./i.test(frame.function));
 }
 
 /** Where a console call was made, as the other SDKs say it: the file and line, and the function when it has a name. */
@@ -440,9 +444,13 @@ export function record(options: BrowserOptions = {}): void {
     const headers = new Headers(request.headers);
     if (out.traceparent && !headers.has("traceparent")) headers.set("traceparent", out.traceparent);
     try {
-      const response = await send(new Request(request, { headers }));
+      // Marked as it arrives, before anything else runs: a wrapper of fetch around this one (the widget's) reads the
+      // mark as soon as the Response reaches it.
+      const response = await send(new Request(request, { headers })).then((arrived) => {
+        if (out.page) Object.defineProperty(arrived, PAGE, { value: out.page });
+        return arrived;
+      });
       out.finish(response.status, false);
-      if (out.page) Object.defineProperty(response, PAGE, { value: out.page });
       return response;
     } catch (error) {
       out.finish(0, true);
@@ -498,7 +506,7 @@ export function record(options: BrowserOptions = {}): void {
       const current = view;
       const from = current ? caller(new Error().stack, own) : undefined;
       const source = from?.filename ?? "";
-      if (current && !ignored.some((prefix) => source.startsWith(prefix))) {
+      if (current && !ignored.some((part) => source.includes(part))) {
         current.trace.logs.push({
           span_id: null,
           time: nowUs(),

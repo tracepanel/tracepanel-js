@@ -5,6 +5,7 @@
 import { beforeAll, expect, test } from "vitest";
 import { record } from "../src/browser.js";
 import { noise } from "./ignored/noise.js";
+import { wrapConsole } from "./overlay.js";
 
 interface Doc {
   id: string;
@@ -99,6 +100,21 @@ test("each response carries the action that made it, for the widget", async () =
   expect(marked).toBe(action.id);
 });
 
+test("a wrapper of fetch around the recording's (the widget's) finds the action's mark as the Response reaches it", async () => {
+  const recording = window.fetch;
+  let marked: unknown;
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await recording(input, init);
+    marked = (response as unknown as Record<symbol, unknown>)[PAGE];
+    return response;
+  };
+  button("Refresh", "/api/books?page=3").click();
+  const action = await sentTrace('/books › click "Refresh"');
+  window.fetch = recording;
+
+  expect(marked).toBe(action.id);
+});
+
 test("a traceparent goes to the page's origin and to propagateTo's, not to others", async () => {
   button("Sync", "http://api.test/sync").click();
   await sentTrace('/books › click "Sync"');
@@ -135,6 +151,26 @@ test("the console in an action keeps where it was logged; a dev server's own cli
   expect(String(action.logs[0]?.attrs && (action.logs[0].attrs as Record<string, unknown>)["code.filepath"])).toMatch(
     /browser\.test\.ts$/,
   );
+});
+
+test("a wrapper of console installed after the recording (Next.js's dev overlay) doesn't hide who logged", async () => {
+  const unwrap = wrapConsole("warn");
+  const element = document.createElement("button");
+  element.textContent = "Warn";
+  element.addEventListener("click", () => {
+    void fetch("/api/books").then(() => {
+      // biome-ignore lint/suspicious/noConsole: the page's own log, which the recording keeps.
+      console.warn("low stock");
+    });
+  });
+  document.body.append(element);
+  element.click();
+  const action = await sentTrace('/books › click "Warn"');
+  unwrap();
+
+  expect(action.logs.map((log) => [log.message, String(log.attrs["code.filepath"]).split("/").at(-1)])).toEqual([
+    ["low stock", "browser.test.ts"],
+  ]);
 });
 
 test("calls nobody started are background", async () => {

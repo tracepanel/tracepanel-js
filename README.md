@@ -122,6 +122,19 @@ export default function RootLayout({ children }) {
 A request's handler is its page or route handler, named by its route
 (`/api/books/[id]`).
 
+In development the app's server also serves the console at `/__tracepanel__/`
+on its own origin, for this machine only, and the badge loads from there.
+`<Tracepanel />` records the pages in the browser too, as the Vite plugin
+does (see below). It takes the same options:
+
+```tsx
+<Tracepanel browser={{ service: "shop-web", propagateTo: ["http://127.0.0.1:8000"] }} />
+```
+
+The recording is inline in `<head>`, so it wraps `fetch` before the app's
+scripts run, even a client that keeps `fetch` from when it is made
+(`openapi-fetch`). `browser={false}` leaves it out.
+
 ### Nuxt
 
 Add the module and start `nuxt dev` with Tracepanel loaded, so it hooks the

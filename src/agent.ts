@@ -110,10 +110,11 @@ export class ConsoleUrl {
 
   constructor(private readonly storeDir: string) {}
 
-  get(): string {
+  /** `fresh`: read now, as a proxy to the console does for each request (a new agent listens on a new port). */
+  get(fresh = false): string {
     const configured = process.env.TRACEPANEL_CONSOLE_URL;
     if (configured) return configured.endsWith("/") ? configured : `${configured}/`;
-    if (!this.url || Date.now() - this.checked > CONSOLE_CHECK_MS) {
+    if (fresh || !this.url || Date.now() - this.checked > CONSOLE_CHECK_MS) {
       this.checked = Date.now();
       this.url = readAddress(join(this.storeDir, "console.addr"));
     }
