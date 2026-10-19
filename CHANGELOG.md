@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.4 (2026-10-19)
+
+Needs `@tracepanel/agent` 0.3.6 (installed with it): its panel lists a page's
+calls under the view or action that made them.
 
 ### Added
 
