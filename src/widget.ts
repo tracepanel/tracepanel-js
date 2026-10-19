@@ -46,11 +46,13 @@ export function badge(tracepanel: Runtime, request: BadgeRequest): Badge | undef
     "Server-Timing": `db;dur=${timing.dbMs.toFixed(1)};desc="${timing.queries} ${noun}", app;dur=${Math.max(totalMs - timing.dbMs, 0).toFixed(1)}, total;dur=${totalMs.toFixed(1)}, tracepanel-issues;desc="pending"`,
   };
   if (consoleUrl) headers["Tracepanel-Url"] = `${consoleUrl}#/t/${timing.id}`;
+  // The console on the page's own origin, where the app serves it: the widget and the page's recording share it.
+  const api = tracepanel.onOrigin?.prefix ?? consoleUrl;
   const scriptAttrs =
     page && consoleUrl
       ? {
-          src: `${consoleUrl}widget.min.js`,
-          "data-tracepanel-api": consoleUrl,
+          src: `${api}widget.min.js`,
+          "data-tracepanel-api": api,
           "data-tracepanel-id": timing.id,
           "data-tracepanel-method": method,
           "data-tracepanel-status": String(status),

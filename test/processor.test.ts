@@ -80,6 +80,19 @@ describe("TracepanelProcessor", () => {
     expect(result.spans.filter((span) => span.kind === "sql").every((span) => span.parent_id === view?.id)).toBe(true);
   });
 
+  it("makes no trace of a request to the console on the app's origin: the page's recording sending its traces", async () => {
+    const before = sent.length;
+    tracer
+      .startSpan("POST", {
+        kind: SpanKind.SERVER,
+        attributes: { "http.request.method": "POST", "url.path": "/__tracepanel__/api/ingest" },
+      })
+      .end();
+    await new Promise((done) => setTimeout(done, 60));
+
+    expect(sent.length).toBe(before);
+  });
+
   it("fingerprints statements and hashes their parameters", async () => {
     const result = await request();
     const [first, second] = result.spans.filter((span) => span.kind === "sql");

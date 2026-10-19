@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Next.js: in development the app's own server answers `/__tracepanel__/`
+  with the console of the project's agent, as the Vite plugin does. It reads
+  the agent's address on each request, starts the agent when none runs and
+  a new one when it went away, and answers this machine only. The badge
+  loads from there.
+- Next.js: `<Tracepanel />` records the pages in the browser too. Each view
+  and action is a trace, and its calls carry a traceparent, to the app's
+  origin and to those in `propagateTo`. `browser={{ service, propagateTo }}`
+  sets its options and `browser={false}` leaves it out. The recording is
+  inline in `<head>`, so it wraps `fetch` before the app's scripts run.
+
+### Changed
+
+- `ignoreSources` of `record()` matches a part of a script's path, not only
+  its start: Next.js's chunk names begin with a hash.
+
+### Fixed
+
+- A request to `/__tracepanel__/` is no trace of the app's, in any
+  framework. A hand-made proxy to the console in Next.js listed the page's
+  `POST /__tracepanel__/api/ingest` among the app's requests.
+- The browser recording marks a Response with its view or action as it
+  arrives, before anything else runs, so a wrapper of `fetch` around it
+  (the widget's) always finds the mark.
+- A console record of the page keeps the line that logged it under a
+  wrapper of `console` added after the recording, such as Next.js's dev
+  overlay. It named the wrapper's line before.
+
 ## 0.3.3 (2026-10-17)
 
 ### Fixed

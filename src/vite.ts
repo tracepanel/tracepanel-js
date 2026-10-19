@@ -12,10 +12,10 @@
 // backend sees the proxy's own address, so its own local-only checks (switching the user) would let anyone through.
 
 import { existsSync, readFileSync } from "node:fs";
-import { type IncomingMessage, request, type ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Starter } from "./agent.js";
+import { answeredHere, forward, PREFIX } from "./proxy.js";
 
 export interface TracepanelViteOptions {
   /** The backend project's directory, where its .tracepanel/ is. By default Vite's root and the folders above it. */
@@ -48,10 +48,6 @@ interface Plugin {
   }[];
 }
 
-const PREFIX = "/__tracepanel__/";
-// The browser recording, served from this package by the plugin itself: the console doesn't have it.
-const BROWSER = fileURLToPath(new URL("./browser.js", import.meta.url));
-
 /** The console's address: given, or what the project's agent wrote in .tracepanel/console.addr. */
 function consoleAddress(options: TracepanelViteOptions, root: string): string | undefined {
   const given = options.console ?? process.env.TRACEPANEL_CONSOLE;
@@ -70,12 +66,6 @@ function consoleAddress(options: TracepanelViteOptions, root: string): string | 
   return undefined;
 }
 
-/** A client on this machine: the console's traces, and what it lets a local caller do, are for its developer only. */
-function isLocal(req: IncomingMessage): boolean {
-  const address = req.socket.remoteAddress ?? "";
-  return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
-}
-
 /**
  * Where the backend project keeps its store, for an agent the plugin starts itself: its `dir`, else Vite's root. None
  * when the console is given (a backend that serves its own, as Django does, starts its agent itself).
@@ -83,36 +73,6 @@ function isLocal(req: IncomingMessage): boolean {
 function storeDir(options: TracepanelViteOptions, root: string): string | undefined {
   if (options.console ?? process.env.TRACEPANEL_CONSOLE) return undefined;
   return resolve(root, options.dir ?? ".", process.env.TRACEPANEL_DIR ?? ".tracepanel");
-}
-
-/**
- * The request, sent on to the console as it came, and its answer back. A GET the agent doesn't answer (its address
- * left over from one that exited) goes once more to what `restart` gives: a new agent's console.
- */
-function forward(target: URL, req: IncomingMessage, res: ServerResponse, restart?: () => string | undefined): void {
-  const upstream = request(
-    {
-      host: target.hostname,
-      port: target.port,
-      method: req.method,
-      path: `${target.pathname.replace(/\/$/, "")}${req.url ?? "/"}`,
-      headers: { ...req.headers, host: target.host },
-    },
-    (answer) => {
-      res.writeHead(answer.statusCode ?? 502, answer.headers);
-      answer.pipe(res);
-    },
-  );
-  upstream.on("error", () => {
-    const again = req.method === "GET" ? restart?.() : undefined;
-    if (again) {
-      forward(new URL(again), req, res);
-      return;
-    }
-    res.writeHead(502, { "Content-Type": "text/plain" });
-    res.end("Tracepanel's agent doesn't answer: is the backend running in development?");
-  });
-  req.pipe(upstream);
 }
 
 // Scripts Vite serves for itself: its client and env (/@vite/), React's refresh runtime (/@react-refresh).
@@ -132,16 +92,7 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use(PREFIX, (req, res) => {
-        if (!isLocal(req)) {
-          res.writeHead(403, { "Content-Type": "text/plain" });
-          res.end("The Tracepanel console answers on this machine only.");
-          return;
-        }
-        if (req.url === "/browser.js") {
-          res.writeHead(200, { "Content-Type": "text/javascript", "Cache-Control": "no-store" });
-          res.end(readFileSync(BROWSER));
-          return;
-        }
+        if (answeredHere(req, res)) return;
         const root = server.config.root;
         // No agent yet (the backend starts it on its first request): the page's first load starts it here instead.
         const address = consoleAddress(options, root) ?? started(root, false);

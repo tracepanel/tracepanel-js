@@ -98,8 +98,9 @@ const NEXT_HANDLERS = new Set([
   "Render.getServerSideProps",
   "Render.renderDocument",
 ]);
-// Next.js's requests for its own assets and dev tooling, not the app's.
-const NEXT_INTERNAL = /^\/(_next|__nextjs)/;
+// Requests that aren't the app's work: Next.js's for its own assets and dev tooling, and the ones to Tracepanel's
+// console on the app's own origin (the widget, the page's recording sending its traces).
+const INTERNAL = /^\/(_next|__nextjs|__tracepanel__\/)/;
 // Prisma's own spans besides the operation: its SQL goes through the driver adapter's driver (pg, mysql2), recorded
 // there; the rest is its query engine's bookkeeping.
 const SKIPPED_NAMES = /^(pg\.connect|pg-pool\.connect|mysql2?\.connect|prisma:(?!client:operation$))/;
@@ -164,7 +165,7 @@ export class TracepanelProcessor implements SpanProcessor {
       // A request, or work outside one that trace() or a task queue started: tracepanel.kind says which.
       const kind = attrsOf(span)["tracepanel.kind"];
       if (span.kind !== SpanKind.SERVER && kind !== "command" && kind !== "task") return;
-      if (NEXT_INTERNAL.test(String(first(attrsOf(span), "http.target", "url.path") ?? ""))) return;
+      if (INTERNAL.test(String(first(attrsOf(span), "http.target", "url.path") ?? ""))) return;
       this.dropAbandoned();
       building = this.start();
       if (kind === "command" || kind === "task") building.trace.kind = kind;
