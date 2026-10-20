@@ -33,7 +33,8 @@ export interface Frame {
   in_app: boolean;
   context_start: number | null;
   context: string[];
-  locals: Record<string, string>;
+  /** The values of the frame's local variables, as text: the app's own frames, when they were read; else null. */
+  locals: Record<string, string> | null;
 }
 
 export interface TraceError {
@@ -59,6 +60,25 @@ export interface Trace {
   errors: TraceError[];
   links: unknown[];
   issues: unknown[];
+  /** Where its time went in code, when it was profiled. */
+  profile?: Profile;
+}
+
+/** A trace's profile: the functions its sampled stacks name, each once, and each stack as indexes into them. */
+export interface Profile {
+  interval_us: number;
+  samples: number;
+  frames: ProfileFrame[];
+  stacks: { frames: number[]; count: number }[];
+}
+
+export interface ProfileFrame {
+  function: string;
+  module: string | null;
+  file: string;
+  /** Where the function is defined. */
+  line: number;
+  in_app: boolean;
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -87,7 +107,7 @@ export const MAX_LOGS = 1000;
 /** Adds `count` to a trace's tally of what went unrecorded. */
 export function countDropped(
   trace: Trace,
-  key: "tracepanel.dropped_spans" | "tracepanel.dropped_logs",
+  key: "tracepanel.dropped_spans" | "tracepanel.dropped_logs" | "tracepanel.dropped_samples",
   count = 1,
 ): void {
   trace.attrs[key] = Number(trace.attrs[key] ?? 0) + count;

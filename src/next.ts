@@ -13,8 +13,10 @@
 
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
+import { context } from "@opentelemetry/api";
 import type { BrowserOptions } from "./browser.js";
 import { headersOnResponses } from "./headers.js";
+import { ASKED as PROFILE, requested } from "./profile.js";
 import { answeredHere, browserModule, forward, PREFIX, recordingScript } from "./proxy.js";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
@@ -68,6 +70,10 @@ export function serveConsole(tracepanel: Runtime): void {
       if (event === "request" && req?.url?.startsWith(PREFIX)) {
         answer(tracepanel, req, args[1] as ServerResponse);
         return true;
+      }
+      // A request that asks to be profiled: Next.js starts its root span in this context.
+      if (event === "request" && req && requested(req.headers)) {
+        return context.with(context.active().setValue(PROFILE, true), () => emit.call(this, event, ...args));
       }
       return emit.call(this, event, ...args);
     } as typeof emit;

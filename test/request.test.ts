@@ -154,7 +154,7 @@ test("the hello says the app keeps what requests carried, unless TRACEPANEL_CAPT
     max_traces: 2000,
     thresholds: expect.any(Object),
     service: "shop",
-    capabilities: ["explain", "request"],
+    capabilities: ["explain", "request", "profile"],
   });
 
   expect(hello(loadConfig({ TRACEPANEL_SERVICE: "shop", TRACEPANEL_CAPTURE_REQUEST: "0" }))).toEqual({
@@ -162,7 +162,7 @@ test("the hello says the app keeps what requests carried, unless TRACEPANEL_CAPT
     max_traces: 2000,
     thresholds: expect.any(Object),
     service: "shop",
-    capabilities: ["explain"],
+    capabilities: ["explain", "profile"],
   });
 
   expect([

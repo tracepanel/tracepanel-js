@@ -10,6 +10,7 @@
 // body: the handler reads that stream itself, and Tracepanel never reads it for the app.
 
 import { propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
 import { redirectCookie, requestAttrs, responseHeaders } from "./request.js";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
@@ -42,6 +43,7 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
       "url.path": url.pathname,
       "http.target": url.pathname + url.search,
       ...(route ? { "http.route": route } : {}),
+      ...(requested(Object.fromEntries(request.headers)) ? { [PROFILE]: true } : {}),
     };
     const startedMs = performance.now();
     // The caller's traceparent, as Node's http instrumentation reads it: the agent links the caller's trace to this.

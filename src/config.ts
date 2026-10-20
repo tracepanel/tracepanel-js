@@ -18,6 +18,21 @@ export interface Config {
    * TRACEPANEL_CAPTURE_REQUEST=0 turns it off.
    */
   captureRequest: boolean;
+  /**
+   * Keep the local variables of the app's own frames of an error (masked; they never leave this machine), read
+   * through Node's inspector: TRACEPANEL_CAPTURE_LOCALS=0 turns it off.
+   */
+  captureLocals: boolean;
+  /**
+   * Sample where each trace's time goes in code (a flame graph in the console): every trace when on
+   * (TRACEPANEL_PROFILE=1); a request with an X-Tracepanel-Profile: 1 header or a tracepanel_profile=1 cookie either
+   * way.
+   */
+  profile: boolean;
+  /** Whether profiling is possible at all: TRACEPANEL_PROFILE_ENABLED=0, and nothing profiles. */
+  profileEnabled: boolean;
+  /** How often a profiled trace is sampled: TRACEPANEL_PROFILE_INTERVAL_MS, each millisecond by default. */
+  profileIntervalMs: number;
 }
 
 /** What the agent reports, and from when. Its defaults are these too. */
@@ -62,6 +77,11 @@ function on(value: string | undefined): boolean {
   return value === undefined || value === "" || !OFF.has(value.toLowerCase());
 }
 
+/** A TRACEPANEL_* switch that is off unless it says on. */
+function onlyIf(value: string | undefined): boolean {
+  return value !== undefined && value !== "" && !OFF.has(value.toLowerCase());
+}
+
 /** On in development: unless NODE_ENV is production, or TRACEPANEL_ENABLED turns it off (or on). */
 function enabled(env: NodeJS.ProcessEnv): boolean {
   const explicit = env.TRACEPANEL_ENABLED?.toLowerCase();
@@ -88,5 +108,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxTraces: Number(env.TRACEPANEL_MAX_TRACES) || 2000,
     thresholds: thresholds(env),
     captureRequest: on(env.TRACEPANEL_CAPTURE_REQUEST),
+    captureLocals: on(env.TRACEPANEL_CAPTURE_LOCALS),
+    profile: onlyIf(env.TRACEPANEL_PROFILE),
+    profileEnabled: on(env.TRACEPANEL_PROFILE_ENABLED),
+    profileIntervalMs: Math.max(Math.floor(Number(env.TRACEPANEL_PROFILE_INTERVAL_MS)) || 1, 1),
   };
 }

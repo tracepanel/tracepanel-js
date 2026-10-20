@@ -24,6 +24,7 @@ import { traceFetch } from "./fetch.js";
 import { PinoLogs, WinstonLogs } from "./loggers.js";
 import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
+import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { TransactionsInstrumentation } from "./transactions.js";
 
@@ -113,6 +114,11 @@ export function start(options: Options = {}): Runtime | undefined {
       ignoreIncomingRequestHook: (request) =>
         options.httpServer === false ||
         (request.method === "OPTIONS" && request.headers["access-control-request-method"] !== undefined),
+      // A request that asks to be profiled says so on its span, as it starts.
+      startIncomingSpanHook: (request) =>
+        tracepanel.config.profileEnabled && "headers" in request && requested(request.headers)
+          ? { [PROFILE]: true }
+          : {},
     }),
   ];
   registerInstrumentations({ instrumentations });

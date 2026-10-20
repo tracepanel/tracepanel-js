@@ -29,7 +29,7 @@ export function sensitive(name: string): boolean {
 }
 
 /** A header's value as one string: several values joined, as Node joins them. */
-function headerValue(value: unknown): string | undefined {
+export function headerValue(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   return Array.isArray(value) ? value.map(String).join(", ") : String(value);
 }
@@ -82,7 +82,7 @@ export function query(search: string): Attrs {
 }
 
 /** The Cookie header's cookies by name, as they came. */
-function parseCookies(header: string): [string, string][] {
+export function parseCookies(header: string): [string, string][] {
   const found: [string, string][] = [];
   for (const part of header.split(";")) {
     const at = part.indexOf("=");

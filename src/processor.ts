@@ -8,6 +8,7 @@ import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
 import { CALL_ORIGIN } from "./fetch.js";
 import { withVersion } from "./frameworks.js";
+import { Locals } from "./locals.js";
 import {
   type Attrs,
   countDropped,
@@ -19,6 +20,7 @@ import {
   type Span,
   type Trace,
 } from "./model.js";
+import { ASKED, ATTRIBUTE, available, Profiler, type Recording, wanted } from "./profile.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, origin } from "./stack.js";
 import { CONTROL } from "./transactions.js";
@@ -65,6 +67,8 @@ interface Building {
    * connection checkout before it started right in the app's call.
    */
   lastOrigin: string | null;
+  /** The trace's profile while it runs, when it is profiled. */
+  recording?: Recording | undefined;
 }
 
 // A request's span can end after the response does (Express ends an async handler's span when its promise settles):
@@ -149,11 +153,17 @@ export class TracepanelProcessor implements SpanProcessor {
    * API) carries the caller's trace id, and is a trace of its own all the same.
    */
   private readonly owner = new Map<string, Building>();
+  private readonly profiler: Profiler | undefined;
+  /** What reads an error's local variables: made as the first trace starts; null where it can't be. */
+  private locals: Locals | null | undefined;
 
   constructor(
     private readonly config: Config,
     private readonly sink: Sink,
-  ) {}
+  ) {
+    this.profiler =
+      config.profileEnabled && available() ? new Profiler(config.root, config.profileIntervalMs) : undefined;
+  }
 
   onStart(span: SdkSpan, parentContext: Context): void {
     const context = span.spanContext();
@@ -176,6 +186,12 @@ export class TracepanelProcessor implements SpanProcessor {
         first(rootAttrs, "http.target", "url.path"),
       );
       this.open.set(context.spanId, building);
+      this.running();
+      this.profiler?.enter(building);
+      // The request asked for it: its root span says so (Node's HTTP server, Bun.serve), or the context the framework
+      // started it in (Next.js).
+      const asked = rootAttrs[ATTRIBUTE] === true || parentContext.getValue(ASKED) === true;
+      if (this.profiler && wanted(this.config, asked)) building.recording = this.profiler.start(building);
     }
     if (!building) return;
     this.owner.set(context.spanId, building);
@@ -219,9 +235,13 @@ export class TracepanelProcessor implements SpanProcessor {
     if (building.replaced.has(context.spanId)) return;
     if (root || !(skipped(span) || this.control(building, span))) this.convert(building, span, root);
     if (!root) return;
+    const sampled = building.recording ? this.profiler?.stop(building.recording) : undefined;
+    this.profiler?.leave(building);
     setTimeout(() => {
       this.close(building);
       this.finish(building, span);
+      if (sampled?.profile) building.trace.profile = sampled.profile;
+      if (sampled?.dropped) countDropped(building.trace, "tracepanel.dropped_samples", sampled.dropped);
       this.sink.submit(limited(building.trace));
     }, LATE_SPANS_MS).unref();
   }
@@ -277,6 +297,19 @@ export class TracepanelProcessor implements SpanProcessor {
   private close(building: Building): void {
     this.open.delete(building.rootSpanId);
     for (const spanId of building.ids.keys()) this.owner.delete(spanId);
+    // One whose root span never ended.
+    if (building.recording) this.profiler?.stop(building.recording);
+    this.profiler?.leave(building);
+    this.running();
+  }
+
+  /** Whether a trace runs, for the errors' local variables: errors are read only then. */
+  private running(): void {
+    const running = this.open.size > 0;
+    if (running && this.locals === undefined && this.config.captureLocals) {
+      this.locals = Locals.start(this.config.root, () => this.current()?.building.trace.id) ?? null;
+    }
+    this.locals?.traces(running);
   }
 
   /**
@@ -305,7 +338,7 @@ export class TracepanelProcessor implements SpanProcessor {
       type: cause.name || "Error",
       message: cause.message,
       handled: false,
-      frames: frames(cause.stack ?? "", this.config.root),
+      frames: frames(cause.stack ?? "", this.config.root, this.locals?.take(cause.stack)),
       chain: [],
     });
   }
@@ -486,13 +519,14 @@ export class TracepanelProcessor implements SpanProcessor {
       if (event.name !== "exception") continue;
       const attrs = event.attributes ?? {};
       const [seconds, nanos] = event.time;
+      const stack = String(attrs["exception.stacktrace"] ?? "");
       building.trace.errors.push({
         span_id: spanId,
         time: Math.round(seconds * 1e6 + nanos / 1e3),
         type: String(attrs["exception.type"] ?? "Error"),
         message: String(attrs["exception.message"] ?? ""),
         handled: false,
-        frames: frames(String(attrs["exception.stacktrace"] ?? ""), this.config.root),
+        frames: frames(stack, this.config.root, this.locals?.take(stack)),
         chain: [],
       });
     }
