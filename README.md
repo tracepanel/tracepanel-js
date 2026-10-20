@@ -246,7 +246,8 @@ page's, such as a dev server's client.
 - Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios, on
   Node and on Bun.
 - BullMQ: each job a worker runs is a task, each job the app adds a step.
-- `console` calls made during a request, and Nest's `Logger`.
+- Logs made during a request: `console` calls, Nest's `Logger`, and pino's
+  and winston's loggers, with their fields and the error they carry.
 - Errors thrown in a handler, with your frames and their source.
 - The caller's trace, when a request carries a W3C `traceparent`: the agent
   links the two.

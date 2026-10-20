@@ -14,6 +14,21 @@ const LEVELS: Record<string, Log["level"]> = {
 
 const CAPTURED = Symbol.for("tracepanel.console");
 
+let quiet = 0;
+
+/**
+ * Runs a logger's own write (pino's, winston's): it recorded the log already, so what it prints through console is
+ * not recorded again.
+ */
+export function quietly<T>(write: () => T): T {
+  quiet++;
+  try {
+    return write();
+  } finally {
+    quiet--;
+  }
+}
+
 /**
  * Each of console's methods becomes a property whose value records the call, then runs the method as it is now:
  * something that replaces it later (Nuxt's dev server puts its own logger there) replaces what runs, not the record.
@@ -25,6 +40,7 @@ export function captureConsole(processor: TracepanelProcessor): void {
   for (const [method, level] of Object.entries(LEVELS)) {
     let current = target[method] as (...args: unknown[]) => void;
     const recorded = (...args: unknown[]) => {
+      if (quiet > 0) return current.apply(console, args);
       const error = args.find((arg): arg is Error => arg instanceof Error);
       processor.addLog({
         time: Date.now() * 1000,

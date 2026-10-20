@@ -21,6 +21,7 @@ import { BullMQInstrumentation } from "./bullmq.js";
 import { captureConsole } from "./console.js";
 import { DatabasesInstrumentation } from "./explain.js";
 import { traceFetch } from "./fetch.js";
+import { PinoLogs, WinstonLogs } from "./loggers.js";
 import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
 import { type Runtime, runtime } from "./runtime.js";
@@ -88,6 +89,8 @@ export function start(options: Options = {}): Runtime | undefined {
     // A Nest app runs on Express: Nest's spans name the controller and method that handled the request.
     nest(),
     new NestLogs(tracepanel.processor),
+    new PinoLogs(tracepanel.processor),
+    new WinstonLogs(tracepanel.processor),
     new PgInstrumentation({ enhancedDatabaseReporting: true }),
     new MySQL2Instrumentation(),
     new IORedisInstrumentation(),

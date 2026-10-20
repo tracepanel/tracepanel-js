@@ -25,6 +25,13 @@
   that answers a page's navigation sets the short-lived
   `tracepanel_redirect` cookie the widget reads, in Express, under
   `withTracepanel()`, Next.js and Nuxt.
+- pino and winston: each log made during a request or a task goes to its
+  trace, with no change to the app's code. The level is on the same scale as
+  console's, the logger's fields (a pino child's bindings, winston's
+  `defaultMeta` and metadata) are `extra.*` attributes, secrets masked, and
+  the error's stack is the log's exception. pino's logger name is the
+  record's logger. What the logger prints through `console` (winston's
+  Console transport with `forceConsole`) is not recorded a second time.
 
 ### Changed
 
