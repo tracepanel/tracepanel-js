@@ -225,7 +225,16 @@ page's, such as a dev server's client.
 
 ## What it records
 
-- HTTP requests, with the route and the handler that served them.
+- HTTP requests, with the route and the handler that served them, and what
+  each one carried: its headers, query and cookies, the body as far as the
+  app read it, and the response's headers. Values under names such as
+  `password`, `token`, `session` or `csrf` are masked, and they never leave
+  your machine. A body is what a body parser read (`req.body` in Express and
+  Nest, an upload's files by name and size), up to 16 KB; under
+  `withTracepanel()`, Next.js and Nuxt the framework reads the body for the
+  app, so it is left out.
+- A form's POST that redirects to another page: the panel on that page
+  lists the POST before it.
 - SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
   Prisma's driver adapters), with the line of your code that ran each
   statement. Prisma's operations show as steps.
@@ -289,6 +298,7 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_LONG_TRANSACTION_MS` | `500` | a long transaction |
 | `TRACEPANEL_QUEUE_WAIT_MS` | `1000` | a task that waited long for a worker |
 | `TRACEPANEL_LARGE_RESULT_ROWS` | `1000` | a query without a LIMIT that read too many rows |
+| `TRACEPANEL_CAPTURE_REQUEST` | on | `0` stops keeping each request's headers, query, cookies and body |
 
 ## Command line
 

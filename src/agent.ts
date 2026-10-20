@@ -122,6 +122,20 @@ export class ConsoleUrl {
   }
 }
 
+/**
+ * The first line to the agent: it finds the issues with this project's limits. The app can EXPLAIN a query on its
+ * database for the console, and its traces hold what each request carried while that is kept.
+ */
+export function hello(config: Config): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL,
+    max_traces: config.maxTraces,
+    thresholds: config.thresholds,
+    service: config.service,
+    capabilities: ["explain", ...(config.captureRequest ? ["request"] : [])],
+  };
+}
+
 /** Batches traces to the agent in the background; a full queue drops a trace rather than slow a request down. */
 export class Sender {
   private queue: Trace[] = [];
@@ -213,16 +227,7 @@ export class Sender {
       socket.setTimeout(500, fail);
       socket.once("error", fail);
       socket.once("connect", () => {
-        // The agent finds the issues with this project's limits.
-        // It can EXPLAIN a query on the app's database for the console.
-        const hello = {
-          protocol: PROTOCOL,
-          max_traces: this.config.maxTraces,
-          thresholds: this.config.thresholds,
-          service: this.config.service,
-          capabilities: ["explain"],
-        };
-        socket.write(`${JSON.stringify(hello)}\n`);
+        socket.write(`${JSON.stringify(hello(this.config))}\n`);
       });
       let received = Buffer.alloc(0);
       socket.on("data", function onData(chunk: Buffer) {

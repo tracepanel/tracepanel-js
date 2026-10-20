@@ -5,8 +5,12 @@
 //   serve({ routes: { "/api/books/:id": (req) => ... }, fetch: (req) => ... });
 //
 // Start the app with `bun --preload @tracepanel/js/register server.ts` so the database driver is hooked as it loads.
+//
+// What a request carried goes into its trace: its headers, query and cookies, and the response's headers. Not its
+// body: the handler reads that stream itself, and Tracepanel never reads it for the app.
 
 import { propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { redirectCookie, requestAttrs, responseHeaders } from "./request.js";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
 import { exposedHeaders, inject, Stream, streamablePage } from "./widget.js";
@@ -83,6 +87,12 @@ async function marked(
   response: Response,
   startedMs: number,
 ): Promise<{ response: Response; ended?: Promise<void> }> {
+  if (tracepanel.config.captureRequest) {
+    tracepanel.processor.setTraceAttrs({
+      ...requestAttrs(Object.fromEntries(request.headers), new URL(request.url).search),
+      ...responseHeaders(response.headers.entries()),
+    });
+  }
   const html = (response.headers.get("content-type") ?? "").includes("text/html");
   const page = html && !response.headers.has("content-encoding");
   const marks = tracepanel.badge({
@@ -95,6 +105,12 @@ async function marked(
   if (!marks) return { response };
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(marks.headers)) headers.set(name, value);
+  const redirect = redirectCookie(
+    marks.headers["Tracepanel-Id"] ?? "",
+    response.status,
+    Object.fromEntries(request.headers),
+  );
+  if (redirect) headers.append("Set-Cookie", redirect);
   const expose = exposedHeaders(
     headers.get("access-control-allow-origin") ?? undefined,
     headers.get("access-control-expose-headers"),

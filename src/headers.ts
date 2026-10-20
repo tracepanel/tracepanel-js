@@ -1,7 +1,11 @@
 // For frameworks that answer from their own server (Next.js, Nuxt): every response of a traced request gets what the
-// widget and the badge read, Tracepanel-Id, Tracepanel-Url and Server-Timing, as its headers go out.
+// widget and the badge read, Tracepanel-Id, Tracepanel-Url and Server-Timing, as its headers go out. Then too, what
+// the request carried goes into its trace (headers, query, cookies; not the body, which the framework reads for the
+// app), with the response's headers; and a redirect that answers a page's navigation sets the cookie that shows it in
+// the next page's panel.
 
 import { ServerResponse } from "node:http";
+import { redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
 import type { Runtime } from "./runtime.js";
 import { exposedHeaders } from "./widget.js";
 
@@ -14,10 +18,26 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
   const writeHead = prototype.writeHead;
   prototype.writeHead = function (this: ServerResponse, ...args: unknown[]) {
     if (!this.headersSent) {
+      const method = this.req?.method ?? "GET";
+      const url = this.req?.url ?? "/";
+      const status = typeof args[0] === "number" ? args[0] : this.statusCode;
+      // Headers passed to writeHead itself (an object) count too: CORS middleware often sets them there.
+      const given = [args[1], args[2]].find((arg) => arg !== null && typeof arg === "object" && !Array.isArray(arg));
+      const passed = (given ?? {}) as Record<string, unknown>;
+      if (tracepanel.config.captureRequest && this.req) {
+        // Before the badge: a response sent outside the request's context finds its trace by the URL until then.
+        tracepanel.processor.setTraceAttrs(
+          {
+            ...requestAttrs(this.req.headers, searchOf(url)),
+            ...responseHeaders([...Object.entries(this.getHeaders()), ...Object.entries(passed)]),
+          },
+          { method, url },
+        );
+      }
       const marks = tracepanel.badge({
-        method: this.req?.method ?? "GET",
-        url: this.req?.url ?? "/",
-        status: typeof args[0] === "number" ? args[0] : this.statusCode,
+        method,
+        url,
+        status,
         startedMs: performance.now(),
         page: false,
         framework: tracepanel.processor.framework() ?? framework,
@@ -25,9 +45,6 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
       for (const [name, value] of Object.entries(marks?.headers ?? {})) {
         if (!this.hasHeader(name)) this.setHeader(name, value);
       }
-      // Headers passed to writeHead itself (an object) count too: CORS middleware often sets them there.
-      const given = [args[1], args[2]].find((arg) => arg !== null && typeof arg === "object" && !Array.isArray(arg));
-      const passed = (given ?? {}) as Record<string, unknown>;
       const lower = Object.fromEntries(
         Object.entries(passed ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
       );
@@ -37,6 +54,14 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
             this.getHeader("access-control-expose-headers") ?? lower["access-control-expose-headers"],
           )
         : undefined;
+      const redirect =
+        marks && this.req ? redirectCookie(marks.headers["Tracepanel-Id"] ?? "", status, this.req.headers) : undefined;
+      if (redirect) {
+        // One passed to writeHead would replace the response's own: the cookie joins it there.
+        const named = Object.keys(passed).find((name) => name.toLowerCase() === "set-cookie");
+        if (named) passed[named] = [...[passed[named]].flat(), redirect];
+        else this.appendHeader("Set-Cookie", redirect);
+      }
       if (expose) {
         this.setHeader("Access-Control-Expose-Headers", expose);
         delete (passed as Record<string, unknown>)["access-control-expose-headers"];
