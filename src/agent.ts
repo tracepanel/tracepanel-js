@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Config } from "./config.js";
 import { type ExplainRequest, explain } from "./explain.js";
 import type { Trace } from "./model.js";
+import { available as canProfile } from "./profile.js";
 
 const PROTOCOL = 1;
 const QUEUE_SIZE = 1000;
@@ -123,8 +124,9 @@ export class ConsoleUrl {
 }
 
 /**
- * The first line to the agent: it finds the issues with this project's limits. The app can EXPLAIN a query on its
- * database for the console, and its traces hold what each request carried while that is kept.
+ * The first line to the agent: it finds the issues with this project's limits. What the app offers the console, said
+ * here only: it can EXPLAIN a query on its database, its traces hold what each request carried while that is kept,
+ * and a request that asks is profiled while profiling is on (the console's Profile toggle shows then).
  */
 export function hello(config: Config): Record<string, unknown> {
   return {
@@ -132,7 +134,11 @@ export function hello(config: Config): Record<string, unknown> {
     max_traces: config.maxTraces,
     thresholds: config.thresholds,
     service: config.service,
-    capabilities: ["explain", ...(config.captureRequest ? ["request"] : [])],
+    capabilities: [
+      "explain",
+      ...(config.captureRequest ? ["request"] : []),
+      ...(config.profileEnabled && canProfile() ? ["profile"] : []),
+    ],
   };
 }
 

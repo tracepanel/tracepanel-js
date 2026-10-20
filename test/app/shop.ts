@@ -28,3 +28,64 @@ export async function checkout(tracer: Tracer, fetch: Fetch): Promise<void> {
 export function underLibrary<T>(call: () => T): T {
   return call(); // library
 }
+
+/** Work on the CPU for a while: what a profile finds. One function for each test, each run once: V8 may leave a
+ * function that it optimized earlier out of a later profile's stacks. */
+function crunch(ms: number): number {
+  const until = performance.now() + ms;
+  let total = 0;
+  while (performance.now() < until) total += Math.sqrt(total + 1);
+  return total;
+}
+
+export function crunchPrices(ms: number): number {
+  return crunch(ms);
+}
+
+export function crunchTaxes(ms: number): number {
+  return crunch(ms);
+}
+
+export function crunchRates(ms: number): number {
+  return crunch(ms);
+}
+
+export function crunchOrders(ms: number): number {
+  return crunch(ms);
+}
+
+/** Another request's work. */
+export function crunchStock(ms: number): number {
+  return crunch(ms);
+}
+
+/** Charges a customer and fails: its locals are what the error shows. */
+export function chargeCard(customer: { id: number; name: string }, password: string): void {
+  const attempts = 3;
+  const note = "x".repeat(300);
+  if (attempts > 2) throw new Error(`card declined for ${customer.name} (${password.length}, ${note.length})`); // declined
+}
+
+/** Places an order, which charges the card. */
+export function placeOrder(items: string[]): void {
+  const total = items.length * 10;
+  chargeCard({ id: 7, name: "Ann" }, `s3cret-${total}`); // ordered
+}
+
+/** Charges the card after a wait. */
+export async function chargeLater(customer: { id: number; name: string }, password: string): Promise<void> {
+  await Promise.resolve();
+  chargeCard(customer, password); // later
+}
+
+/** Places an order whose charge fails after a wait: the order is waiting on an `await` as the error is thrown. */
+export async function placeOrderLater(items: string[]): Promise<void> {
+  const total = items.length * 10;
+  await chargeLater({ id: 7, name: "Ann" }, `s3cret-${total}`); // awaited
+}
+
+/** As Next.js's redirect() throws: an error that steers the render, not a failure. */
+export function goHome(): never {
+  const target = "/";
+  throw Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;replace;${target};307;` }); // redirected
+}

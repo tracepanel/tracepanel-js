@@ -12,22 +12,41 @@ const FRAME = /^\s*at (?:async )?(?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/;
 // This package's own files are never the app's.
 const OWN = fileURLToPath(new URL(".", import.meta.url));
 
+/** Whether a file is this package's own. */
+export function ownFile(file: string): boolean {
+  return file.startsWith(OWN);
+}
+
 export interface StackFrame {
   function: string;
   file: string;
   line: number;
 }
 
-export function parseStack(stack: string | undefined): StackFrame[] {
+/**
+ * The frames of a V8 stack, innermost first. `mapped`: a bundle's frames as the app's sources, through its source
+ * map; without it, where the code that ran is, as the debugger sees it.
+ */
+export function parseStack(stack: string | undefined, mapped = true): StackFrame[] {
   const frames: StackFrame[] = [];
   for (const line of (stack ?? "").split("\n").slice(1)) {
     const match = FRAME.exec(line);
     if (!match) continue;
     const [, fn, location, lineno, column] = match;
     const file = location?.startsWith("file://") ? fileURLToPath(location) : (location ?? "");
-    frames.push(original({ function: fn ?? "<anonymous>", file, line: Number(lineno) }, Number(column)));
+    const frame = { function: fn ?? "<anonymous>", file, line: Number(lineno) };
+    frames.push(mapped ? original(frame, Number(column)) : frame);
   }
   return frames;
+}
+
+/** Whether a line of a V8 stack is an `async` one: a caller waiting for the frame above, not running under it. */
+export function asyncFrames(stack: string | undefined): boolean[] {
+  return (stack ?? "")
+    .split("\n")
+    .slice(1)
+    .filter((line) => FRAME.test(line))
+    .map((line) => /^\s*at async /.test(line));
 }
 
 // A dev server's bundle (`next dev`'s .next/dev/server/chunks/*.js, `nuxt dev`'s .nuxt/dev/index.mjs) runs the app's
@@ -81,6 +100,13 @@ function sourcePath(source: string, mapFile: string, sourceRoot: string): string
   const webpack = /^webpack:\/\/[^/]*\/(.*)$/.exec(source);
   if (webpack) return resolve(process.cwd(), webpack[1] ?? "");
   return isAbsolute(source) ? source : resolve(dirname(mapFile), sourceRoot, source);
+}
+
+/** Where a function is in the app's source: a file URL or path and a line and column (1-based) of the code that ran. */
+export function place(url: string, line: number, column: number): StackFrame {
+  const file = url.startsWith("file://") ? fileURLToPath(url) : url;
+  // This package's own code stays where it is: its source map leads out of it, to its TypeScript.
+  return ownFile(file) ? { function: "", file, line } : original({ function: "", file, line }, column);
 }
 
 /** The frame in the app's source, when its file is a bundle with a source map. */
@@ -148,10 +174,17 @@ function sourceAround(file: string, line: number): { start: number | null; conte
   }
 }
 
-/** An error's frames, outermost first as the console shows every SDK's, with the source of the app's own. */
-export function frames(stack: string | undefined, root: string): Frame[] {
+/**
+ * An error's frames, outermost first as the console shows every SDK's, with the source of the app's own. `locals`:
+ * the local variables of the app's frames, by the frame's place in the stack (innermost first), when they were read.
+ */
+export function frames(
+  stack: string | undefined,
+  root: string,
+  locals?: readonly (Record<string, string> | undefined)[],
+): Frame[] {
   return parseStack(stack)
-    .map((frame) => {
+    .map((frame, index) => {
       const own = inApp(frame.file, root);
       const { start, context } = own ? sourceAround(frame.file, frame.line) : { start: null, context: [] };
       return {
@@ -162,8 +195,14 @@ export function frames(stack: string | undefined, root: string): Frame[] {
         in_app: own,
         context_start: start,
         context,
-        locals: {},
+        locals: (own && locals?.[index]) || null,
       };
     })
     .reverse();
+}
+
+/** A library's file as its package names it (express/lib/router/index.js), Node's own as Node names them. */
+export function libraryPath(file: string): string {
+  const at = file.lastIndexOf(`${sep}node_modules${sep}`);
+  return at >= 0 ? file.slice(at + `${sep}node_modules${sep}`.length) : file;
 }

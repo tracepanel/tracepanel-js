@@ -248,7 +248,19 @@ page's, such as a dev server's client.
 - BullMQ: each job a worker runs is a task, each job the app adds a step.
 - Logs made during a request: `console` calls, Nest's `Logger`, and pino's
   and winston's loggers, with their fields and the error they carry.
-- Errors thrown in a handler, with your frames and their source.
+- Errors thrown in a handler, with your frames, their source and their
+  local variables. Node's inspector reads the variables as the error is
+  thrown, in your own frames only, while a request runs; a value under a
+  name such as `password` or `token` is masked, and a long one is cut. A
+  caller waiting on an `await` has none. Each error read costs about a
+  millisecond, at most 50 a second; a process under a debugger
+  (`--inspect`) is left alone.
+- Where a request's time goes in code, for the console's flame graph, when
+  it asks: the panel's Profile toggle, or an `X-Tracepanel-Profile: 1`
+  header. V8's profiler samples the whole process, and one event loop runs
+  every request at once, so a profile keeps the samples taken while its
+  request was the only one running, and counts the rest
+  (`tracepanel.dropped_samples`). Time spent waiting on I/O is not in it.
 - The caller's trace, when a request carries a W3C `traceparent`: the agent
   links the two.
 
@@ -300,6 +312,10 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_QUEUE_WAIT_MS` | `1000` | a task that waited long for a worker |
 | `TRACEPANEL_LARGE_RESULT_ROWS` | `1000` | a query without a LIMIT that read too many rows |
 | `TRACEPANEL_CAPTURE_REQUEST` | on | `0` stops keeping each request's headers, query, cookies and body |
+| `TRACEPANEL_CAPTURE_LOCALS` | on | `0` stops reading an error's local variables |
+| `TRACEPANEL_PROFILE` | off | `1` profiles every trace, not only a request that asks |
+| `TRACEPANEL_PROFILE_ENABLED` | on | `0` profiles nothing, and the console offers no Profile toggle |
+| `TRACEPANEL_PROFILE_INTERVAL_MS` | `1` | how often a profiled trace is sampled |
 
 ## Command line
 

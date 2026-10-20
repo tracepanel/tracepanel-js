@@ -4,6 +4,29 @@
 
 ### Added
 
+- A request's profile, as the Python SDK records it: where its time went in
+  code, for the console's flame graph. A request asks with an
+  `X-Tracepanel-Profile: 1` header or the panel's `tracepanel_profile=1`
+  cookie, set while its Profile toggle is on: in Express, Nest, Next.js and
+  Nuxt, and under `withTracepanel()` on Node.
+  `TRACEPANEL_PROFILE=1` profiles every trace, `TRACEPANEL_PROFILE_ENABLED=0`
+  none, and `TRACEPANEL_PROFILE_INTERVAL_MS` sets how often it samples
+  (every millisecond by default). The hello says `profile` while it is on.
+  V8's profiler runs through Node's inspector only while traces are
+  profiled, and stops 30 seconds after the last one. It samples the whole
+  process: a profile keeps what was sampled while its request was the only
+  one running, and counts the rest in `tracepanel.dropped_samples`. Waiting
+  on I/O takes no samples. Bun has no profile.
+- An error's frames carry their local variables, as the Python SDK records
+  them: the app's own frames, each value as text, cut as Python cuts a
+  `repr()`, and masked under a sensitive name. Node's inspector pauses the
+  app as an error is thrown in a request, only while one runs and at most 50
+  times a second, and reads the frames then; a caller waiting on an
+  `await` has none. The errors Next.js throws to steer a render (a
+  `redirect()`, a `notFound()`, a bail-out) are not read and count against
+  no limit. `TRACEPANEL_CAPTURE_LOCALS=0` turns it off; a process
+  under a debugger is left alone, and Bun has none. A frame without locals
+  now sends `null`, as the Python SDK does, instead of an empty object.
 - A streamed HTML page gets the panel too: one written in pieces without a
   `Content-Length` in Express, a `ReadableStream` body from `Bun.serve` or
   another fetch handler under `withTracepanel()`. The script goes in right
