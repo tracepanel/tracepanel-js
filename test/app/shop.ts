@@ -83,3 +83,9 @@ export async function placeOrderLater(items: string[]): Promise<void> {
   const total = items.length * 10;
   await chargeLater({ id: 7, name: "Ann" }, `s3cret-${total}`); // awaited
 }
+
+/** As Next.js's redirect() throws: an error that steers the render, not a failure. */
+export function goHome(): never {
+  const target = "/";
+  throw Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;replace;${target};307;` }); // redirected
+}

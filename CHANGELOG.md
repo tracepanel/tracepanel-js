@@ -22,7 +22,9 @@
   `repr()`, and masked under a sensitive name. Node's inspector pauses the
   app as an error is thrown in a request, only while one runs and at most 50
   times a second, and reads the frames then; a caller waiting on an
-  `await` has none. `TRACEPANEL_CAPTURE_LOCALS=0` turns it off; a process
+  `await` has none. The errors Next.js throws to steer a render (a
+  `redirect()`, a `notFound()`, a bail-out) are not read and count against
+  no limit. `TRACEPANEL_CAPTURE_LOCALS=0` turns it off; a process
   under a debugger is left alone, and Bun has none. A frame without locals
   now sends `null`, as the Python SDK does, instead of an empty object.
 - A streamed HTML page gets the panel too: one written in pieces without a

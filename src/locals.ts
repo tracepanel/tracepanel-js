@@ -102,6 +102,19 @@ function same(frame: StackFrame, callFrame: CallFrame): boolean {
   return callFrame.functionName !== "" && name === callFrame.functionName;
 }
 
+/**
+ * Errors Next.js throws to steer a render rather than to fail it: redirect(), notFound() and the other HTTP
+ * fallbacks, a dynamic or client-side bail-out, a prerender's hanging promise. Each starts its stack with its message,
+ * the code Next.js checks for. They are thrown on ordinary requests, so they are not read and spend no pause budget.
+ */
+const STEERING =
+  /^(?:\w*Error: )?(?:NEXT_REDIRECT|NEXT_HTTP_ERROR_FALLBACK;|Dynamic server usage: |Bail out to client-side rendering: |During prerendering, )|^StaticGenBailoutError\b/;
+
+/** Whether an error, by its stack, is one Next.js throws to steer a render. */
+export function steers(stack: string): boolean {
+  return STEERING.test(stack);
+}
+
 /** Reads the locals of errors thrown in a trace, for its errors to carry. */
 export class Locals {
   private tracing = false;
@@ -209,7 +222,7 @@ export class Locals {
   private paused(event: Paused): void {
     if (event.reason !== "exception" && event.reason !== "promiseRejection") return;
     const { objectId, description: stack } = event.data ?? {};
-    if (event.data?.subtype !== "error" || !objectId || !stack || !this.budget()) return;
+    if (event.data?.subtype !== "error" || !objectId || !stack || steers(stack) || !this.budget()) return;
     const trace = this.traceId();
     // The inspector describes an error by its stack. Read already in this trace, it is the same error thrown again on
     // its way up.

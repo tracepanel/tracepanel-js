@@ -6,10 +6,10 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterAll, describe, expect, it } from "vitest";
 import { type Config, loadConfig } from "../src/config.js";
-import { repr, variables } from "../src/locals.js";
+import { repr, steers, variables } from "../src/locals.js";
 import type { Frame, Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
-import { placeOrder, placeOrderLater } from "./app/shop.js";
+import { goHome, placeOrder, placeOrderLater } from "./app/shop.js";
 
 // The project is test/app: its code is the app's, this file stands for the framework.
 const APP = new URL("./app/", import.meta.url);
@@ -117,6 +117,12 @@ describe("an error's local variables", () => {
     expect(own(result).map(([, , locals]) => locals)).toEqual([null, null]);
   });
 
+  it("are not read for an error Next.js throws to steer the render, a redirect", async () => {
+    const result = await app().request(() => goHome());
+
+    expect(own(result)).toEqual([["goHome", line("redirected"), null]]);
+  });
+
   it("are not read outside a trace", async () => {
     const { request } = app();
     await request(() => {});
@@ -132,6 +138,26 @@ describe("an error's local variables", () => {
     });
 
     expect(own(result).map(([, , locals]) => locals)).toEqual([null, null]);
+  });
+});
+
+describe("an error that steers a Next.js render", () => {
+  it("is told by its stack's first line, as Next.js 16 makes each", () => {
+    const steering = [
+      "Error: NEXT_REDIRECT\n    at redirect (/app/node_modules/next/dist/redirect.js:5:19)",
+      "Error: NEXT_HTTP_ERROR_FALLBACK;404\n    at notFound (x.js:1:1)",
+      "DynamicServerError: Dynamic server usage: cookies\n    at x (x.js:1:1)",
+      "BailoutToCSRError: Bail out to client-side rendering: next/dynamic\n    at x (x.js:1:1)",
+      'Error: During prerendering, `cookies()` rejects when the prerender is complete. This occurred at route "/".',
+      'StaticGenBailoutError: Page with `dynamic = "error"` couldn\'t be rendered statically',
+    ];
+    const failing = [
+      "Error: card declined\n    at chargeCard (shop.ts:65:9)",
+      "TypeError: Cannot read properties of undefined (reading 'NEXT_REDIRECT')",
+    ];
+
+    expect(steering.map(steers)).toEqual(steering.map(() => true));
+    expect(failing.map(steers)).toEqual([false, false]);
   });
 });
 
