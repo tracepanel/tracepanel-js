@@ -13,6 +13,11 @@ export interface Config {
   maxTraces: number;
   /** The agent's limits for the issues it finds, as the Python SDK names them: TRACEPANEL_SLOW_SQL_MS and so on. */
   thresholds: Thresholds;
+  /**
+   * Keep a request's headers, query, cookies and the body the app read (masked; they never leave this machine):
+   * TRACEPANEL_CAPTURE_REQUEST=0 turns it off.
+   */
+  captureRequest: boolean;
 }
 
 /** What the agent reports, and from when. Its defaults are these too. */
@@ -52,6 +57,11 @@ function thresholds(env: NodeJS.ProcessEnv): Thresholds {
 
 const OFF = new Set(["0", "false", "no", "off"]);
 
+/** A TRACEPANEL_* switch: on unless it says off. */
+function on(value: string | undefined): boolean {
+  return value === undefined || value === "" || !OFF.has(value.toLowerCase());
+}
+
 /** On in development: unless NODE_ENV is production, or TRACEPANEL_ENABLED turns it off (or on). */
 function enabled(env: NodeJS.ProcessEnv): boolean {
   const explicit = env.TRACEPANEL_ENABLED?.toLowerCase();
@@ -77,5 +87,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     service: env.TRACEPANEL_SERVICE || packageName(root) || basename(root),
     maxTraces: Number(env.TRACEPANEL_MAX_TRACES) || 2000,
     thresholds: thresholds(env),
+    captureRequest: on(env.TRACEPANEL_CAPTURE_REQUEST),
   };
 }

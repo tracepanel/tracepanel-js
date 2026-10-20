@@ -330,10 +330,13 @@ export class TracepanelProcessor implements SpanProcessor {
     if (current) current.building.route = route;
   }
 
-  /** Attributes of the active request's trace: the signed-in user (setUser()). */
-  setTraceAttrs(attrs: Attrs): void {
-    const current = this.current();
-    if (current) Object.assign(current.building.trace.attrs, attrs);
+  /**
+   * Attributes of the active request's trace: the signed-in user (setUser()), what the request carried. `request`
+   * finds it when its response goes out outside its context, as timing() does.
+   */
+  setTraceAttrs(attrs: Attrs, request?: { method: string; url: string }): void {
+    const building = this.current()?.building ?? (request ? this.waiting(request) : undefined);
+    if (building) Object.assign(building.trace.attrs, attrs);
   }
 
   /** The framework the active request ran on, as the panel shows it. */

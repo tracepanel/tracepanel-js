@@ -11,6 +11,20 @@
   else is held: only a tag cut between two pieces waits for its end. A
   streamed response also gets the badge's headers, with the time so far. A
   compressed page, or one that declares its size, is left as it is.
+- What each request carried, for the panel's Request tab, as the Python SDK
+  records it: its headers, query and cookies, the body as far as the app
+  read it, and the response's headers. Values under sensitive names
+  (`password`, `token`, `session`, `csrf`, `api_key` and the like) are
+  masked, and `Set-Cookie` always is. The body is what a body parser left
+  in `req.body` in Express and Nest, with an upload's files by name and
+  size, up to 16 KB; Tracepanel never reads a request's stream itself, so
+  `withTracepanel()`, Next.js and Nuxt record no body.
+  `TRACEPANEL_CAPTURE_REQUEST=0` turns it off; the agent's hello says
+  `request` while it is on.
+- A form's POST that redirects shows in the next page's panel: a redirect
+  that answers a page's navigation sets the short-lived
+  `tracepanel_redirect` cookie the widget reads, in Express, under
+  `withTracepanel()`, Next.js and Nuxt.
 
 ### Changed
 

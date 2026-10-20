@@ -100,4 +100,17 @@ describe("TracepanelProcessor", () => {
     expect(first?.attrs["db.params_hash"]).not.toBe(second?.attrs["db.params_hash"]);
     expect(result.logs.map((log) => log.message)).toEqual(["listed"]);
   });
+  it("records what a request carried, found by its URL when its response goes out outside the request's context", async () => {
+    const root = tracer.startSpan("POST", {
+      kind: SpanKind.SERVER,
+      attributes: { "http.request.method": "POST", "http.target": "/books?page=2" },
+    });
+    processor.setTraceAttrs({ "url.query": "page=2" }, { method: "POST", url: "/books?page=2" });
+    processor.setTraceAttrs({ "url.query": "other" }, { method: "GET", url: "/books?page=2" });
+    root.setAttribute("http.response.status_code", 303);
+    root.end();
+    const result = await new Promise<Trace>((done) => setTimeout(() => done(sent.at(-1) as Trace), 60));
+
+    expect(result.attrs).toMatchObject({ "url.query": "page=2", "http.status_code": 303 });
+  });
 });
