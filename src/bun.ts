@@ -9,7 +9,7 @@
 import { propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
-import { exposedHeaders, inject } from "./widget.js";
+import { exposedHeaders, inject, Stream, streamablePage } from "./widget.js";
 
 type Handler = (request: Request, server?: unknown) => Response | Promise<Response>;
 type ErrorHandler = (error: Error) => Response | Promise<Response>;
@@ -48,6 +48,8 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
     const options = { kind: SpanKind.SERVER, attributes };
     return tracer.startActiveSpan(`${request.method}`, options, caller, async (span) => {
       tracepanel.processor.setFramework("Bun.serve");
+      // A page streamed through the widget's script: its request ends with the body.
+      let streamed: Promise<void> | undefined;
       try {
         let response: Response;
         try {
@@ -59,18 +61,30 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
         }
         span.setAttribute("http.response.status_code", response.status);
         if (response.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
-        return await marked(tracepanel, request, response, startedMs);
+        const answer = await marked(tracepanel, request, response, startedMs);
+        streamed = answer.ended;
+        return answer.response;
       } finally {
-        span.end();
+        if (streamed) void streamed.then(() => span.end());
+        else span.end();
       }
     });
   };
   return traced as H;
 }
 
-/** The trace's headers on the response, and the widget in an HTML page. */
-async function marked(tracepanel: Runtime, request: Request, response: Response, startedMs: number): Promise<Response> {
-  const page = (response.headers.get("content-type") ?? "").includes("text/html");
+/**
+ * The trace's headers on the response, and the widget in an HTML page: put into its body as it streams when its size
+ * isn't declared, with `ended` settled once that body has gone out.
+ */
+async function marked(
+  tracepanel: Runtime,
+  request: Request,
+  response: Response,
+  startedMs: number,
+): Promise<{ response: Response; ended?: Promise<void> }> {
+  const html = (response.headers.get("content-type") ?? "").includes("text/html");
+  const page = html && !response.headers.has("content-encoding");
   const marks = tracepanel.badge({
     method: request.method,
     status: response.status,
@@ -78,7 +92,7 @@ async function marked(tracepanel: Runtime, request: Request, response: Response,
     page,
     framework: tracepanel.processor.framework() ?? "Bun.serve",
   });
-  if (!marks) return response;
+  if (!marks) return { response };
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(marks.headers)) headers.set(name, value);
   const expose = exposedHeaders(
@@ -86,10 +100,49 @@ async function marked(tracepanel: Runtime, request: Request, response: Response,
     headers.get("access-control-expose-headers"),
   );
   if (expose) headers.set("Access-Control-Expose-Headers", expose);
-  if (!marks.script) return new Response(response.body, { status: response.status, headers });
+  const init = { status: response.status, statusText: response.statusText, headers };
+  if (!marks.script || !response.body) return { response: new Response(response.body, init) };
+  if (streamablePage((name) => headers.get(name))) {
+    let ended = () => {};
+    const done = new Promise<void>((resolve) => (ended = resolve));
+    return { response: new Response(through(response.body, new Stream(marks.script), ended), init), ended: done };
+  }
   headers.delete("content-length");
-  const body = inject(await response.text(), marks.script);
-  return new Response(body, { status: response.status, statusText: response.statusText, headers });
+  return { response: new Response(inject(await response.text(), marks.script), init) };
+}
+
+/** A body through the widget's script, piece by piece as the client reads it; `ended` once it is over. */
+function through(body: ReadableStream<Uint8Array>, script: Stream, ended: () => void): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        // Until something goes out: a pull that enqueues nothing is not called again.
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            const rest = script.end();
+            if (rest.length > 0) controller.enqueue(rest);
+            controller.close();
+            ended();
+            return;
+          }
+          const piece = script.feed(value);
+          if (piece.length > 0) {
+            controller.enqueue(piece);
+            return;
+          }
+        }
+      } catch (error) {
+        controller.error(error);
+        ended();
+      }
+    },
+    async cancel(reason) {
+      ended();
+      await reader.cancel(reason);
+    },
+  });
 }
 
 /** Bun.serve's routes, each handler traced under its pattern: `/api/books/:id`. */
