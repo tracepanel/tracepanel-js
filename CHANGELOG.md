@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A streamed HTML page gets the panel too: one written in pieces without a
+  `Content-Length` in Express, a `ReadableStream` body from `Bun.serve` or
+  another fetch handler under `withTracepanel()`. The script goes in right
+  after the `<head>` (or `<body>`) opens, as the pieces pass, and nothing
+  else is held: only a tag cut between two pieces waits for its end. A
+  streamed response also gets the badge's headers, with the time so far. A
+  compressed page, or one that declares its size, is left as it is.
+
+### Changed
+
+- Express no longer holds a response written in pieces without a
+  `Content-Length` until it ends: it goes out as the app writes it.
+
+### Fixed
+
+- A page whose first tag is `<header>` gets the script in its `<head>`, not
+  after the `<header>`.
+- `Bun.serve`: a compressed HTML page is no longer read as text for the
+  script, which broke it.
+
 ## 0.3.4 (2026-10-19)
 
 Needs `@tracepanel/agent` 0.3.6 (installed with it): its panel lists a page's

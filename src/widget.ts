@@ -88,8 +88,73 @@ export function exposedHeaders(allowOrigin: unknown, existing: unknown): string 
 
 /** The tag first in <head>, so the widget wraps fetch before the page's scripts keep a reference to it. */
 export function inject(page: string, tag: string): string {
-  const head = /<head[^>]*>/i.exec(page);
+  const head = /<head(?:\s[^>]*)?>/i.exec(page);
   if (head) return page.slice(0, head.index + head[0].length) + tag + page.slice(head.index + head[0].length);
   const body = page.toLowerCase().lastIndexOf("</body>");
   return body >= 0 ? page.slice(0, body) + tag + page.slice(body) : page;
+}
+
+/**
+ * Whether a response is an HTML page the script can go into as it streams: not compressed, its size not declared
+ * (the script would change it).
+ */
+export function streamablePage(header: (name: string) => unknown): boolean {
+  const html = String(header("content-type") ?? "").includes("text/html");
+  return html && header("content-encoding") == null && header("content-length") == null;
+}
+
+// Where a streamed page gets the script: right after its <head> opens, or its <body> without one.
+const OPENING = /<(?:head|body)(?:\s[^>]*)?>/i;
+/** A page streamed this far without either is not one the script goes into: the rest passes as it comes. */
+export const STREAM_LOOKAHEAD = 65_536;
+
+/**
+ * The script put into an HTML page that goes out in pieces, as they pass.
+ *
+ * Nothing is held but the end of a piece from its last `<` (a tag that may go on in the next one), until the script
+ * is in.
+ */
+export class Stream {
+  private readonly tag: Buffer;
+  private held: Buffer = Buffer.alloc(0);
+  private seen = 0;
+  private done = false;
+
+  constructor(tag: string) {
+    this.tag = Buffer.from(tag);
+  }
+
+  /** What goes out now, of the piece and what was held. */
+  feed(piece: Uint8Array): Buffer {
+    const chunk = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
+    if (this.done) return chunk;
+    const data = this.held.length > 0 ? Buffer.concat([this.held, chunk]) : chunk;
+    this.held = Buffer.alloc(0);
+    // Latin-1 keeps one character per byte: the indexes found are the bytes'.
+    const text = data.toString("latin1");
+    const found = OPENING.exec(text);
+    if (found) {
+      this.done = true;
+      const at = found.index + found[0].length;
+      return Buffer.concat([data.subarray(0, at), this.tag, data.subarray(at)]);
+    }
+    this.seen += chunk.length;
+    if (this.seen > STREAM_LOOKAHEAD) {
+      this.done = true;
+      return data;
+    }
+    const cut = text.lastIndexOf("<");
+    if (cut === -1 || text.includes(">", cut)) return data;
+    // A copy: the app may reuse the piece's memory once it is written.
+    this.held = Buffer.from(data.subarray(cut));
+    return data.subarray(0, cut);
+  }
+
+  /** What was held, once the body ends. */
+  end(): Buffer {
+    const rest = this.held;
+    this.held = Buffer.alloc(0);
+    this.done = true;
+    return rest;
+  }
 }
