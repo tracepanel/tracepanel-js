@@ -4,6 +4,19 @@
 
 ### Added
 
+- The request's body in Next.js (App Router route handlers and server
+  actions, Pages Router API routes), Nuxt, and Bun.serve or any handler
+  under `withTracepanel()` (Hono, Elysia), for the panel's Request tab, as
+  Express and the Python SDK record it: `http.request.body`, up to 16 KB,
+  with `http.request.body.truncated` past it. JSON and forms have the values
+  under sensitive names masked, text is cut, binary is left out. A
+  multipart form keeps its fields and its files by name and size, never
+  their contents, however large the upload. JSON or a URL-encoded form past
+  16 KB is left out: its secrets can't be masked from a part of it. Only
+  what the app read is recorded: each piece passes a tap on its way to the
+  app, which keeps a copy of the start and reads nothing itself. A body the
+  app never reads is not waited for, and an upload still streams.
+  `TRACEPANEL_CAPTURE_REQUEST=0` leaves the body alone.
 - The request's session, for the panel's Request tab, as the Python SDK
   records it: `session.<key>` for each value the session holds as the
   handler left it, as text cut as a local variable is. A value under a

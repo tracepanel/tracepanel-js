@@ -51,3 +51,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: bun --preload ./dist/register.js -e "const { withTracepanel } = await import('./dist/bun.js'); console.log(typeof withTracepanel)"
+      # Bun.serve's own requests: their bodies read through the tap, the handler getting every byte.
+      - run: bun test/bun/body.ts

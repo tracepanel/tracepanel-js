@@ -229,10 +229,16 @@ page's, such as a dev server's client.
   each one carried: its headers, query and cookies, the body as far as the
   app read it, and the response's headers. Values under names such as
   `password`, `token`, `session` or `csrf` are masked, and they never leave
-  your machine. A body is what a body parser read (`req.body` in Express and
-  Nest, an upload's files by name and size), up to 16 KB; under
-  `withTracepanel()`, Next.js and Nuxt the framework reads the body for the
-  app, so it is left out.
+  your machine. A body is what the app read, up to 16 KB: in Express and
+  Nest what a body parser read (`req.body`, an upload's files by name and
+  size); in Next.js, Nuxt and under `withTracepanel()` the bytes the app's
+  own reads took from the request's stream, a copy of their start kept as
+  they pass. JSON and forms have their secrets masked, text is cut at
+  16 KB, and binary bodies are left out. A multipart form keeps its fields
+  and its files by name and size, never their contents, however large the
+  upload. JSON or a URL-encoded form past 16 KB is left out, since its
+  secrets can't be masked from a part of it. A body the app never reads is
+  not recorded, and Tracepanel never reads it or waits for it.
 - The request's session as the handler left it: express-session's or
   cookie-session's `req.session` in Express and Nest, and in Nuxt the
   sessions h3's `useSession()` read (nuxt-auth-utils' among them). Each

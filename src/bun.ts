@@ -6,10 +6,12 @@
 //
 // Start the app with `bun --preload @tracepanel/js/register server.ts` so the database driver is hooked as it loads.
 //
-// What a request carried goes into its trace: its headers, query and cookies, and the response's headers. Not its
-// body: the handler reads that stream itself, and Tracepanel never reads it for the app.
+// What a request carried goes into its trace: its headers, query and cookies, its body as far as the handler read it,
+// and the response's headers. The handler reads the body's stream itself: its pieces pass a tap on their way to it
+// (body.ts), and Tracepanel never reads it for the app.
 
 import { propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { type BodyTap, tapRequest } from "./body.js";
 import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
 import { redirectCookie, requestAttrs, responseHeaders } from "./request.js";
 import type { Runtime } from "./runtime.js";
@@ -52,6 +54,7 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
       keys: (headers) => [...headers.keys()],
     });
     const options = { kind: SpanKind.SERVER, attributes };
+    const body = tracepanel.config.captureRequest ? tapRequest(request) : undefined;
     return tracer.startActiveSpan(`${request.method}`, options, caller, async (span) => {
       tracepanel.processor.setFramework("Bun.serve");
       // A page streamed through the widget's script: its request ends with the body.
@@ -67,7 +70,7 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
         }
         span.setAttribute("http.response.status_code", response.status);
         if (response.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
-        const answer = await marked(tracepanel, request, response, startedMs);
+        const answer = await marked(tracepanel, request, response, startedMs, body);
         streamed = answer.ended;
         return answer.response;
       } finally {
@@ -88,10 +91,12 @@ async function marked(
   request: Request,
   response: Response,
   startedMs: number,
+  body?: BodyTap,
 ): Promise<{ response: Response; ended?: Promise<void> }> {
   if (tracepanel.config.captureRequest) {
     tracepanel.processor.setTraceAttrs({
       ...requestAttrs(Object.fromEntries(request.headers), new URL(request.url).search),
+      ...body?.attrs(),
       ...responseHeaders(response.headers.entries()),
     });
   }

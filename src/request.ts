@@ -2,8 +2,9 @@
 // headers; and the cookie that tells the widget which requests redirected to the page it is on.
 //
 // They stay on this machine (the agent keeps them out of what it sends anywhere), and the values under a sensitive
-// name are masked before they are recorded. A body is only what the app read itself (a body parser's `req.body`), up
-// to MAX_BODY characters: Tracepanel never reads a request's stream for the app.
+// name are masked before they are recorded. A body is only what the app read itself, up to MAX_BODY characters: a
+// body parser's `req.body`, or the bytes the app's own reads took from the request's stream (body.ts). Tracepanel
+// never reads a request's stream for the app.
 
 import type { Attrs } from "./model.js";
 
@@ -117,7 +118,7 @@ export function searchOf(url: string): string {
   return at < 0 ? "" : url.slice(at);
 }
 
-function cut(text: string): Attrs {
+export function cut(text: string): Attrs {
   if (text.length <= MAX_BODY) return { "http.request.body": text };
   return { "http.request.body": text.slice(0, MAX_BODY), "http.request.body.truncated": true };
 }
@@ -134,7 +135,7 @@ export function masked(value: unknown): unknown {
 }
 
 /** A form's fields as they would have been sent, sensitive values masked, then its files by name and size. */
-function formText(fields: Iterable<[string, unknown]>, files: [string, string, number][] = []): string {
+export function formText(fields: Iterable<[string, unknown]>, files: [string, string, number][] = []): string {
   const pairs: [string, string][] = [];
   for (const [name, value] of fields) {
     if (sensitive(name)) pairs.push([name, MASK]);
@@ -150,7 +151,7 @@ function plain(value: unknown): string {
   return value !== null && typeof value === "object" ? JSON.stringify(masked(value)) : String(value ?? "");
 }
 
-function kindOf(contentType: string): string {
+export function kindOf(contentType: string): string {
   return (contentType.split(";", 1)[0] ?? "").trim().toLowerCase();
 }
 
@@ -176,6 +177,17 @@ function textBody(contentType: string, text: string): Attrs {
   if (kind === "application/x-www-form-urlencoded") return cut(formText(new URLSearchParams(text)));
   if (kind.startsWith("text/") || kind === "application/xml" || kind === "application/graphql") return cut(text);
   return {};
+}
+
+/**
+ * http.request.body from the bytes the app read, as far as it read them: JSON and forms with secrets masked, text as
+ * it is, binary not. `complete` is false when only the start of the body is at hand: JSON or a form can't be read
+ * (nor its secrets masked) from a part of it.
+ */
+export function readBody(contentType: string, data: Uint8Array, complete: boolean): Attrs {
+  const kind = kindOf(contentType);
+  if (data.length === 0 || (!complete && (isJson(kind) || isForm(kind)))) return {};
+  return textBody(contentType, Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8"));
 }
 
 /** A file an upload middleware (multer) read: its field, file name and size. */
