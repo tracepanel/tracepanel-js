@@ -233,11 +233,21 @@ page's, such as a dev server's client.
   Nest, an upload's files by name and size), up to 16 KB; under
   `withTracepanel()`, Next.js and Nuxt the framework reads the body for the
   app, so it is left out.
+- The request's session as the handler left it: express-session's or
+  cookie-session's `req.session` in Express and Nest, and in Nuxt the
+  sessions h3's `useSession()` read (nuxt-auth-utils' among them). Each
+  value is text, masked under a sensitive name and below one, and
+  nuxt-auth-utils' `secure` data always is. Next.js and Bun have no
+  session of their own, and a sealed cookie (iron-session, Auth.js) takes
+  the app's secret to read, so none is recorded there: `setUser()` names
+  the signed-in user instead.
 - A form's POST that redirects to another page: the panel on that page
   lists the POST before it.
 - SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
   Prisma's driver adapters), with the line of your code that ran each
-  statement. Prisma's operations show as steps.
+  statement. A statement no code of yours made, such as a session store's,
+  names the library code that asked for it, past the driver and the ORM;
+  so do Redis and MongoDB commands. Prisma's operations show as steps.
 - Transactions: BEGIN … COMMIT (or ROLLBACK) on a `pg` client or a `mysql2`
   connection, with its statements and the calls made inside it, and its
   savepoints.

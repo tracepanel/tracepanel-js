@@ -2,13 +2,14 @@
 // get widget.min.js. A response the handler ends at once (a page, a JSON answer) is held until then; one written in
 // pieces without a Content-Length is a stream, and goes out as it comes, an HTML page with the script put in as it
 // passes. What the request carried goes into its trace as the response goes out: its headers, query, cookies, the
-// body a body parser read (`req.body`, an upload's files), and the response's headers. A redirect that answers a
+// body a body parser read (`req.body`, an upload's files), the session (`req.session`), and the response's headers. A redirect that answers a
 // page's navigation (a form's POST) sets the cookie that shows it in the next page's panel.
 
 import type { NextFunction, Request, Response } from "express";
 import type { Attrs } from "./model.js";
 import { hasBody, parsedBody, redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
 import { runtime } from "./runtime.js";
+import { expressSession } from "./session.js";
 import { badge, exposedHeaders, inject, Stream, streamablePage } from "./widget.js";
 
 type Write = Response["write"];
@@ -21,9 +22,12 @@ function toBuffer(chunk: unknown, encoding?: BufferEncoding): Buffer {
   return Buffer.from(String(chunk), encoding);
 }
 
-/** What the request carried, the body as far as the app's body parser read it, and the response's headers so far. */
+/**
+ * What the request carried, the body as far as the app's body parser read it, the session as the handler left it
+ * (express-session's, cookie-session's), and the response's headers so far.
+ */
 function carried(req: Request, res: Response): Attrs {
-  const upload = req as Request & { file?: unknown; files?: unknown };
+  const upload = req as Request & { file?: unknown; files?: unknown; session?: unknown };
   const body = hasBody(req.headers)
     ? parsedBody({
         contentType: req.headers["content-type"] ?? "",
@@ -35,6 +39,7 @@ function carried(req: Request, res: Response): Attrs {
   return {
     ...requestAttrs(req.headers, searchOf(req.originalUrl ?? req.url)),
     ...body,
+    ...expressSession(upload.session),
     ...responseHeaders(Object.entries(res.getHeaders())),
   };
 }

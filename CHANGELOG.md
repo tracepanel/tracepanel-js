@@ -4,6 +4,25 @@
 
 ### Added
 
+- The request's session, for the panel's Request tab, as the Python SDK
+  records it: `session.<key>` for each value the session holds as the
+  handler left it, as text cut as a local variable is. A value under a
+  sensitive name is masked, and so is one under it at any depth; Passport's
+  `passport` (who is signed in) is kept, nuxt-auth-utils' `secure` always
+  masked. Express and Nest read express-session's or cookie-session's
+  `req.session`, Nuxt the sessions h3's `useSession()` read, each under its
+  name when there are several. Next.js and Bun have no session of their
+  own, and a sealed cookie (iron-session, Auth.js) can't be read without
+  the app's secret, so they record none. `TRACEPANEL_CAPTURE_REQUEST=0`
+  turns it off with the rest of the request.
+- A database call no code of the app's made, such as a session store's
+  query before any handler runs, has `code.caller`, as the Python SDK
+  records it: the library code that asked for it, the first frame past the
+  driver, its ORM, OpenTelemetry and Tracepanel
+  (`connect-pg-simple/index.js:… in PGStore.get`). The panel shows it marked
+  as a library's. SQL statements, transactions, Prisma operations, Redis
+  and MongoDB commands have it; a call with the app's line on its stack
+  does not.
 - A request's profile, as the Python SDK records it: where its time went in
   code, for the console's flame graph. A request asks with an
   `X-Tracepanel-Profile: 1` header or the panel's `tracepanel_profile=1`

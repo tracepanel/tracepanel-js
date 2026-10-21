@@ -99,6 +99,8 @@ describe("transactions", () => {
       "db.transaction.savepoint": false,
       "db.transaction.outcome": "commit",
       "code.origin": null,
+      // The project is /app: this file is library code, the caller of a transaction no code of the app's began.
+      "code.caller": expect.stringMatching(/\/test\/transactions\.test\.ts:\d+ in /),
     });
   });
 

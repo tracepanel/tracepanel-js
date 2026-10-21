@@ -1,4 +1,5 @@
-// The app's own code in a V8 stack: where a query was made (code.origin), and an error's frames with their source.
+// The app's own code in a V8 stack: where a query was made (code.origin), or the library code that asked for one
+// none of the app's code made (code.caller); and an error's frames with their source.
 
 import { readFileSync } from "node:fs";
 import nodeModule, { type SourceMap } from "node:module";
@@ -156,8 +157,73 @@ function deepStack(): string | undefined {
 
 /** `file:line in function` of the innermost frame of the app's own code on the current stack, or null. */
 export function origin(root: string): string | null {
-  const frame = parseStack(deepStack()).find((candidate) => inApp(candidate.file, root));
-  return frame ? `${relative(root, frame.file)}:${frame.line} in ${shortName(frame.function)}` : null;
+  return madeAt(root).origin;
+}
+
+// What makes a call rather than asks for one: the drivers, the ORMs and query builders on them, their pools, the
+// instrumentation around them and the hooks that load it. Past these is the library code that wanted the call made
+// (a session store, an admin panel, a job queue).
+const CALL_LAYERS = new Set([
+  "@opentelemetry",
+  "@prisma",
+  "@mikro-orm",
+  "@redis",
+  "@tracepanel",
+  "drizzle-orm",
+  "generic-pool",
+  "import-in-the-middle",
+  "ioredis",
+  "knex",
+  "kysely",
+  "mongodb",
+  "mongoose",
+  "mysql",
+  "mysql2",
+  "objection",
+  "pg",
+  "pg-cursor",
+  "pg-pool",
+  "pg-protocol",
+  "prisma",
+  "redis",
+  "require-in-the-middle",
+  "sequelize",
+  "shimmer",
+  "tarn",
+  "tslib",
+  "typeorm",
+]);
+
+/** The installed package a file is in (pg, @prisma/client's scope @prisma), or null for a file in none. */
+function packageOf(file: string): string | null {
+  const at = file.lastIndexOf(`${sep}node_modules${sep}`);
+  if (at < 0) return null;
+  return file.slice(at + `${sep}node_modules${sep}`.length).split(sep)[0] ?? null;
+}
+
+/** Whether a frame is library code that may have asked for a call: not a driver's, Node's, Tracepanel's or glue. */
+function asks(file: string, root: string): boolean {
+  if (!isAbsolute(file) || ownFile(file)) return false;
+  const name = packageOf(file);
+  if (name !== null) return !CALL_LAYERS.has(name);
+  // A bundle's frame that no source map led out of is the bundler's glue.
+  return !BUNDLES.some((dir) => file.startsWith(root + dir));
+}
+
+/**
+ * Where the call being made now was made. `origin`: `file:line in function` of the innermost frame of the app's own
+ * code. Without one, `caller`: the library code that asked for it, the first frame past the driver, its ORM and
+ * Tracepanel (`connect-pg-simple/index.js:… in PGStore.get`), as the Python SDK's code.caller names it.
+ */
+export function madeAt(root: string): { origin: string | null; caller: string | null } {
+  const stack = parseStack(deepStack());
+  const own = stack.find((frame) => inApp(frame.file, root));
+  if (own) return { origin: `${relative(root, own.file)}:${own.line} in ${shortName(own.function)}`, caller: null };
+  const asked = stack.find((frame) => asks(frame.file, root));
+  return {
+    origin: null,
+    caller: asked ? `${libraryPath(asked.file)}:${asked.line} in ${shortName(asked.function)}` : null,
+  };
 }
 
 function shortName(fn: string): string {
