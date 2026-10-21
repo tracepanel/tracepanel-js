@@ -74,6 +74,14 @@
   the error's stack is the log's exception. pino's logger name is the
   record's logger. What the logger prints through `console` (winston's
   Console transport with `forceConsole`) is not recorded a second time.
+- BullMQ's jobs in flight, for Now on the console's Tasks page, as the
+  Python SDK sends Celery's and RQ's: task events go to the agent as a job
+  is added (with the request and step that added it), as a worker starts
+  it, and as it ends or waits for its next attempt, with the error. A
+  worker says it is there as it starts running, then every 30 seconds with
+  the jobs it runs, so a job whose process was killed leaves the list. A
+  job's data shows at a glance, as JSON cut to 200 characters, values under
+  sensitive keys masked. The hello says `live_tasks` once BullMQ is loaded.
 
 ### Changed
 
@@ -82,6 +90,10 @@
 
 ### Fixed
 
+- BullMQ: a job that threw an `UnrecoverableError` is a failure, attempts
+  left or not, as BullMQ has it, not a retry; one that threw to move itself
+  on (a `DelayedError`, `WaitingChildrenError`, a rate limit) is not a
+  failure on its last attempt.
 - A page whose first tag is `<header>` gets the script in its `<head>`, not
   after the `<header>`.
 - `Bun.serve`: a compressed HTML page is no longer read as text for the

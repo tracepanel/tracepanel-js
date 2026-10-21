@@ -1,6 +1,7 @@
 // Traces go to the project's agent, which finds their issues, keeps them and serves the console. Its addresses are in
 // <store>/agent.addr and console.addr. The wire: a hello line, then frames of a 4-byte big-endian length and a JSON
-// array of traces. The agent starts on demand, as the other SDKs start it, and outlives the app's restarts.
+// array of traces, or an object of task events (`{"tasks": [...]}`: a queue's jobs while they are in flight). The
+// agent starts on demand, as the other SDKs start it, and outlives the app's restarts.
 
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
@@ -124,9 +125,24 @@ export class ConsoleUrl {
 }
 
 /**
+ * A task event: a job queued, started, retried or finished, or a worker's heartbeat, with what that step knows (see
+ * bullmq.ts). The console's Live list of tasks in flight is made of them, before a task's trace exists.
+ */
+export type TaskEvent = Record<string, unknown>;
+
+/** What the integrations send the agent beyond traces (`live_tasks`: BullMQ's task events), as they say on load. */
+const SENDS = new Set<string>();
+
+/** Say in the hello that this app sends `name` (`live_tasks`). */
+export function sends(name: string): void {
+  SENDS.add(name);
+}
+
+/**
  * The first line to the agent: it finds the issues with this project's limits. What the app offers the console, said
  * here only: it can EXPLAIN a query on its database, its traces hold what each request carried while that is kept,
- * and a request that asks is profiled while profiling is on (the console's Profile toggle shows then).
+ * and a request that asks is profiled while profiling is on (the console's Profile toggle shows then); and what it
+ * sends besides traces (`live_tasks`).
  */
 export function hello(config: Config): Record<string, unknown> {
   return {
@@ -138,18 +154,25 @@ export function hello(config: Config): Record<string, unknown> {
       "explain",
       ...(config.captureRequest ? ["request"] : []),
       ...(config.profileEnabled && canProfile() ? ["profile"] : []),
+      ...[...SENDS].sort(),
     ],
   };
 }
 
-/** Batches traces to the agent in the background; a full queue drops a trace rather than slow a request down. */
+/**
+ * Batches traces and task events to the agent in the background; a full queue drops one rather than slow a request
+ * down.
+ */
 export class Sender {
   private queue: Trace[] = [];
+  private events: TaskEvent[] = [];
   private timer: NodeJS.Timeout | undefined;
   private socket: Socket | undefined;
   private connecting: Promise<Socket | undefined> | undefined;
   private retryAt = 0;
   private warned = false;
+  /** What the connection's hello said the app sends: a module that sends more loaded after it (bullmq) reconnects. */
+  private said = "";
 
   constructor(
     private readonly config: Config,
@@ -160,6 +183,14 @@ export class Sender {
     if (this.queue.length >= QUEUE_SIZE) return;
     this.queue.push(trace);
     if (this.queue.length >= BATCH_SIZE) this.flushSoon(0);
+    else this.flushSoon(BATCH_WAIT_MS);
+  }
+
+  /** A task event, sent with the next batch: not counted with the traces, and dropped while no agent answers. */
+  submitEvent(event: TaskEvent): void {
+    if (this.events.length >= QUEUE_SIZE) return;
+    this.events.push(event);
+    if (this.events.length >= BATCH_SIZE) this.flushSoon(0);
     else this.flushSoon(BATCH_WAIT_MS);
   }
 
@@ -175,17 +206,21 @@ export class Sender {
 
   private async flush(): Promise<void> {
     const batch = this.queue.splice(0, BATCH_SIZE);
-    if (batch.length === 0) return;
+    const events = this.events.splice(0, BATCH_SIZE);
+    if (batch.length === 0 && events.length === 0) return;
     const socket = await this.connection();
     if (!socket) return;
-    const data = Buffer.from(JSON.stringify(batch));
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(data.length);
-    socket.write(Buffer.concat([length, data]));
-    if (this.queue.length > 0) this.flushSoon(0);
+    if (batch.length > 0) writeFrame(socket, batch);
+    if (events.length > 0) writeFrame(socket, { tasks: events });
+    if (this.queue.length > 0 || this.events.length > 0) this.flushSoon(0);
   }
 
   private async connection(): Promise<Socket | undefined> {
+    if (this.socket && !this.socket.destroyed && this.said !== saying(this.config)) {
+      // The hello is the one place the app says what it sends: a new connection says it again.
+      this.socket.destroy();
+      this.socket = undefined;
+    }
     if (this.socket && !this.socket.destroyed) return this.socket;
     if (Date.now() < this.retryAt) return undefined;
     this.connecting ??= this.open().finally(() => {
@@ -233,6 +268,7 @@ export class Sender {
       socket.setTimeout(500, fail);
       socket.once("error", fail);
       socket.once("connect", () => {
+        this.said = saying(this.config);
         socket.write(`${JSON.stringify(hello(this.config))}\n`);
       });
       let received = Buffer.alloc(0);
@@ -256,6 +292,19 @@ export class Sender {
       });
     });
   }
+}
+
+/** What a hello says the app sends, to tell when it says more. */
+function saying(config: Config): string {
+  return JSON.stringify(hello(config).capabilities);
+}
+
+/** One frame: a 4-byte big-endian length, then the JSON. */
+function writeFrame(socket: Socket, payload: unknown): void {
+  const data = Buffer.from(JSON.stringify(payload));
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  socket.write(Buffer.concat([length, data]));
 }
 
 function hostPort(value: string): { host: string; port: number } {
@@ -298,8 +347,5 @@ async function answer(socket: Socket, request: AgentRequest): Promise<void> {
   } catch (error) {
     reply = { answer: request.id, error: error instanceof Error ? error.message : String(error) };
   }
-  const data = Buffer.from(JSON.stringify(reply));
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  if (!socket.destroyed) socket.write(Buffer.concat([length, data]));
+  if (!socket.destroyed) writeFrame(socket, reply);
 }

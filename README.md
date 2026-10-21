@@ -256,6 +256,9 @@ page's, such as a dev server's client.
 - Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios, on
   Node and on Bun.
 - BullMQ: each job a worker runs is a task, each job the app adds a step.
+  While a job is in flight, the console's Tasks page lists it under Now:
+  queued, running in its worker, or waiting for its next attempt, and the
+  workers that run them.
 - Logs made during a request: `console` calls, Nest's `Logger`, and pino's
   and winston's loggers, with their fields and the error they carry.
 - Errors thrown in a handler, with your frames, their source and their

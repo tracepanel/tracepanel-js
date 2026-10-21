@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { type Context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import type { TaskEvent } from "./agent.js";
 import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
 import { CALL_ORIGIN } from "./fetch.js";
@@ -28,6 +29,8 @@ import { CONTROL } from "./transactions.js";
 /** Where a trace goes once its request ends. */
 export interface Sink {
   submit(trace: Trace): void;
+  /** A task event to the agent, where the sink sends them (a test's collector may not). */
+  submitEvent?(event: TaskEvent): void;
 }
 
 /** One request's trace while its spans end. */
@@ -264,6 +267,11 @@ export class TracepanelProcessor implements SpanProcessor {
 
   shutdown(): Promise<void> {
     return Promise.resolve();
+  }
+
+  /** A task event to the agent: a queue's job in flight, or a worker's heartbeat (bullmq.ts). */
+  taskEvent(event: TaskEvent): void {
+    this.sink.submitEvent?.(event);
   }
 
   /** The trace being built for the active request, with the current span's Tracepanel id. */
