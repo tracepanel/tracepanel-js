@@ -1,17 +1,39 @@
 // For frameworks that answer from their own server (Next.js, Nuxt): every response of a traced request gets what the
 // widget and the badge read, Tracepanel-Id, Tracepanel-Url and Server-Timing, as its headers go out. Then too, what
-// the request carried goes into its trace (headers, query, cookies; not the body, which the framework reads for the
+// the request carried goes into its trace (headers, query, cookies, the body as far as the framework read it for the
 // app), with the response's headers; and a redirect that answers a page's navigation sets the cookie that shows it in
-// the next page's panel.
+// the next page's panel. A request's body is tapped as the server hands the request over: the framework reads it from
+// the stream, and its pieces pass the tap on their way (body.ts).
 
-import { ServerResponse } from "node:http";
-import { redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
+import http, { type IncomingMessage, ServerResponse } from "node:http";
+import https from "node:https";
+import { tapIncoming, tapOf } from "./body.js";
+import { hasBody, redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
 import type { Runtime } from "./runtime.js";
 import { exposedHeaders } from "./widget.js";
 
 const PATCHED = Symbol.for("tracepanel.headers");
+const TAPPING = Symbol.for("tracepanel.body.tapping");
+
+/** The app's HTTP servers (made before this runs too) tap the body of each request that has one. */
+function tapBodies(tracepanel: Runtime): void {
+  for (const prototype of [http.Server.prototype, https.Server.prototype]) {
+    const server = prototype as http.Server & { [TAPPING]?: boolean };
+    if (server[TAPPING]) continue;
+    server[TAPPING] = true;
+    const emit = server.emit;
+    server.emit = function (this: http.Server, event: string | symbol, ...args: unknown[]) {
+      const req = args[0] as IncomingMessage | undefined;
+      if (event === "request" && req && tracepanel.config.captureRequest && hasBody(req.headers) && !tapOf(req)) {
+        tapIncoming(req);
+      }
+      return emit.call(this, event, ...args);
+    } as typeof emit;
+  }
+}
 
 export function headersOnResponses(tracepanel: Runtime, framework: string): void {
+  tapBodies(tracepanel);
   const prototype = ServerResponse.prototype as ServerResponse & { [PATCHED]?: boolean };
   if (prototype[PATCHED]) return;
   prototype[PATCHED] = true;
@@ -29,6 +51,7 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
         tracepanel.processor.setTraceAttrs(
           {
             ...requestAttrs(this.req.headers, searchOf(url)),
+            ...tapOf(this.req)?.attrs(),
             ...responseHeaders([...Object.entries(this.getHeaders()), ...Object.entries(passed)]),
           },
           { method, url },
