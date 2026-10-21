@@ -22,7 +22,7 @@ import {
 } from "./model.js";
 import { ASKED, ATTRIBUTE, available, Profiler, type Recording, wanted } from "./profile.js";
 import { fingerprint, spanName, statement } from "./sql.js";
-import { frames, origin } from "./stack.js";
+import { frames, madeAt } from "./stack.js";
 import { CONTROL } from "./transactions.js";
 
 /** Where a trace goes once its request ends. */
@@ -36,6 +36,8 @@ interface Building {
   /** OTel span id: the Tracepanel span id it is, or its nearest kept ancestor's when it is left out. */
   ids: Map<string, string | null>;
   origins: Map<string, string | null>;
+  /** OTel span id: the library code that asked for a call none of the app's code was on the stack of. */
+  callers: Map<string, string>;
   queries: number;
   dbTime: number;
   framework: string;
@@ -195,8 +197,9 @@ export class TracepanelProcessor implements SpanProcessor {
     }
     if (!building) return;
     this.owner.set(context.spanId, building);
-    const found = origin(this.config.root);
+    const { origin: found, caller } = madeAt(this.config.root);
     if (found) building.lastOrigin = found;
+    if (caller) building.callers.set(context.spanId, caller);
     const attrs = attrsOf(span);
     if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
@@ -395,6 +398,7 @@ export class TracepanelProcessor implements SpanProcessor {
       },
       ids: new Map(),
       origins: new Map(),
+      callers: new Map(),
       queries: 0,
       dbTime: 0,
       framework: "node:http",
@@ -432,6 +436,9 @@ export class TracepanelProcessor implements SpanProcessor {
       attrs: {},
     };
     const codeOrigin = building.origins.get(context.spanId) ?? null;
+    // A database call none of the app's code made: the library code that asked for it, as the Python SDK records it.
+    const caller = building.callers.get(context.spanId);
+    const asked = codeOrigin === null && caller ? { "code.caller": caller } : {};
     const sql = isRedis(attrs) || isMongo(attrs) ? "" : statementOf(attrs);
     if (root) {
       converted.kind = { http: "http", task: "task.run", command: "command" }[building.trace.kind];
@@ -458,24 +465,24 @@ export class TracepanelProcessor implements SpanProcessor {
     } else if (attrs["tracepanel.span_kind"] === "transaction") {
       converted.kind = "transaction";
       const { "tracepanel.span_kind": _, ...own } = attrs;
-      converted.attrs = { ...own, "code.origin": codeOrigin };
+      converted.attrs = { ...own, "code.origin": codeOrigin, ...asked };
     } else if (isRedis(attrs)) {
       const call = redisCall(attrs, span.name);
       converted.kind = "redis";
       converted.name = call.name;
-      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
+      converted.attrs = { ...call.attrs, "code.origin": codeOrigin, ...asked };
     } else if (isMongo(attrs)) {
       const call = mongoCall(attrs, span.name);
       converted.kind = "mongodb";
       converted.name = call.name;
-      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
+      converted.attrs = { ...call.attrs, "code.origin": codeOrigin, ...asked };
     } else if (span.name === "prisma:client:operation") {
       converted.name = `prisma ${attrs.model ? `${attrs.model}.` : ""}${attrs.method ?? "operation"}`;
-      converted.attrs = { "code.origin": codeOrigin };
+      converted.attrs = { "code.origin": codeOrigin, ...asked };
     } else if (sql) {
       converted.kind = "sql";
       converted.name = spanName(sql);
-      converted.attrs = this.sqlAttrs(attrs, sql, codeOrigin);
+      converted.attrs = { ...this.sqlAttrs(attrs, sql, codeOrigin), ...asked };
       building.queries += 1;
       building.dbTime += converted.duration;
     } else if (span.kind === SpanKind.CLIENT && first(attrs, "http.request.method", "http.method")) {

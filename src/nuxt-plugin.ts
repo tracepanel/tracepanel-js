@@ -4,13 +4,14 @@
 import { captureConsole } from "./console.js";
 import { headersOnResponses } from "./headers.js";
 import type { Runtime } from "./runtime.js";
+import { h3Sessions } from "./session.js";
 
 const KEY = Symbol.for("tracepanel.runtime");
 
 interface Event {
   method?: string;
   path?: string;
-  context: { matchedRoute?: { path?: string } };
+  context: { matchedRoute?: { path?: string }; sessions?: unknown };
 }
 
 interface NitroApp {
@@ -38,6 +39,11 @@ export default function tracepanelPlugin(nitroApp: NitroApp): void {
   nitroApp.hooks.hook("beforeResponse", (event) => {
     const route = event.context.matchedRoute?.path;
     if (route && !route.includes("**")) tracepanel.processor.setRoute(route);
+    // The sessions useSession() read (nuxt-auth-utils' among them), as the handler left them.
+    const session = tracepanel.config.captureRequest ? h3Sessions(event.context.sessions) : {};
+    if (Object.keys(session).length > 0) {
+      tracepanel.processor.setTraceAttrs(session, { method: event.method ?? "GET", url: event.path ?? "/" });
+    }
   });
   nitroApp.hooks.hook("render:html", (html, { event }) => {
     const marks = tracepanel.badge({

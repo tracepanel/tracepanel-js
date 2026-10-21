@@ -123,7 +123,7 @@ function cut(text: string): Attrs {
 }
 
 /** A JSON value with the values under sensitive keys masked, at any depth. */
-function masked(value: unknown): unknown {
+export function masked(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(masked);
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
