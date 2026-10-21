@@ -101,7 +101,8 @@ export function start(options: Options = {}): Runtime | undefined {
     new PrismaInstrumentation(),
     // BEGIN … COMMIT on a connection as a transaction span: after pg's and mysql2's, so its statements are inside.
     new TransactionsInstrumentation(),
-    new BullMQInstrumentation(),
+    // Its jobs' task events too, for the console's Live list.
+    new BullMQInstrumentation(tracepanel.processor),
     // The databases the app queries, for the console's EXPLAIN.
     new DatabasesInstrumentation(),
     // fetch(): Node's own, through undici (Bun's: traceBunCalls() below).
