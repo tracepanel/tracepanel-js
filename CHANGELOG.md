@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-21)
+
+Needs `@tracepanel/agent` 0.4.0 (installed with it): an app says what it
+offers the console in its hello, and the console shows its tasks in flight.
 
 ### Added
 
