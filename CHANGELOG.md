@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 (2026-10-21)
+
+Needs `@tracepanel/agent` 0.4.1 (installed with it): its console names a
+JavaScript app's handler as one, not a view, a busy worker no longer reads
+idle between tasks, and each log record carries its date.
+
+### Changed
+
+- Installs `@tracepanel/agent` 0.4.1 or a later patch, rather than 0.4.0.
+
 ## 0.4.0 (2026-10-21)
 
 Needs `@tracepanel/agent` 0.4.0 (installed with it): an app says what it
