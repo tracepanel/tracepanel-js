@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0 (2026-10-26)
+
+Needs `@tracepanel/agent` 0.5.0 (installed with it). Its console has pages
+for AWS, LLM calls and file storage, shows memory and GC pauses in profiles,
+draws a task's workflow whole, and has a new look for the call tree, the
+lists and the light theme. It keeps its traces in a new store file,
+`traces.v24.sqlite3`, and doesn't read the old one: the traces and issues an
+earlier agent recorded stay there, and you can delete it.
+
+### Changed
+
+- Installs `@tracepanel/agent` 0.5.0 or a later patch, rather than 0.4.1.
+
 ## 0.4.1 (2026-10-21)
 
 Needs `@tracepanel/agent` 0.4.1 (installed with it): its console names a
