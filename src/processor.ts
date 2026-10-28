@@ -33,6 +33,9 @@ export interface Sink {
   submitEvent?(event: TaskEvent): void;
 }
 
+/** The kinds of work a trace() or an integration starts a trace of: tracepanel.kind on its root span. */
+const WORK = new Set(["command", "task", "test"]);
+
 /** One request's trace while its spans end. */
 interface Building {
   trace: Trace;
@@ -50,6 +53,8 @@ interface Building {
   startedMs: number;
   /** OTel span id of the request's root span here: its parent, if any, is in another process. */
   rootSpanId: string;
+  /** The W3C trace id the root span has: a test's, for the requests the test made of the app. */
+  traceId: string;
   /** The route pattern a framework named (Nitro's /api/books/:id), for a root span that has none. */
   route: string | null;
   /** The request as its root span started: method and target, to find it from a response sent outside its context. */
@@ -168,7 +173,8 @@ export class TracepanelProcessor implements SpanProcessor {
 
   constructor(
     private readonly config: Config,
-    private readonly sink: Sink,
+    /** Where the traces go: a test runner's integration puts its own in front of the agent's (testing.ts). */
+    public sink: Sink,
   ) {
     this.profiler =
       config.profileEnabled && available() ? new Profiler(config.root, config.profileIntervalMs) : undefined;
@@ -183,12 +189,13 @@ export class TracepanelProcessor implements SpanProcessor {
     if (local) {
       // A request, or work outside one that trace() or a task queue started: tracepanel.kind says which.
       const kind = attrsOf(span)["tracepanel.kind"];
-      if (span.kind !== SpanKind.SERVER && kind !== "command" && kind !== "task") return;
+      if (span.kind !== SpanKind.SERVER && !WORK.has(String(kind))) return;
       if (INTERNAL.test(String(first(attrsOf(span), "http.target", "url.path") ?? ""))) return;
       this.dropAbandoned();
       building = this.start();
-      if (kind === "command" || kind === "task") building.trace.kind = kind;
+      if (kind === "command" || kind === "task" || kind === "test") building.trace.kind = kind;
       building.rootSpanId = context.spanId;
+      building.traceId = context.traceId;
       const rootAttrs = attrsOf(span);
       building.request = requestKey(
         first(rootAttrs, "http.request.method", "http.method"),
@@ -292,6 +299,21 @@ export class TracepanelProcessor implements SpanProcessor {
     const context = span.spanContext();
     const building = this.owner.get(context.spanId);
     return building ? { building, spanId: building.ids.get(context.spanId) ?? null } : undefined;
+  }
+
+  /** The trace being built from an OTel span, while it is: a test's, its spans so far. */
+  openTrace(spanId: string): Trace | undefined {
+    return this.owner.get(spanId)?.trace;
+  }
+
+  /**
+   * The traces of this W3C trace id still being built, or waiting for their late spans: the requests a test made of
+   * the app, their traces not yet sent. `except`: the OTel id of a root span left out (the test's own, running).
+   */
+  building(traceId: string, except?: string): Trace[] {
+    return [...this.open.values()]
+      .filter((building) => building.traceId === traceId && building.rootSpanId !== except)
+      .map((building) => building.trace);
   }
 
   /** What the widget shows before the request's span ends: its id, its queries so far and their time. */
@@ -424,6 +446,7 @@ export class TracepanelProcessor implements SpanProcessor {
       framework: "node:http",
       startedMs: performance.now(),
       rootSpanId: "",
+      traceId: "",
       route: null,
       request: "",
       answered: false,
@@ -463,7 +486,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const orm = building.orms.get(context.spanId);
     const sql = isRedis(attrs) || isMongo(attrs) ? "" : statementOf(attrs);
     if (root) {
-      converted.kind = { http: "http", task: "task.run", command: "command" }[building.trace.kind];
+      converted.kind = { http: "http", task: "task.run", command: "command", test: "function" }[building.trace.kind];
     } else if (attrs["express.type"] === "request_handler") {
       converted.kind = "view";
       converted.name = String(attrs["express.name"] ?? span.name);
@@ -602,7 +625,10 @@ export class TracepanelProcessor implements SpanProcessor {
     if (root.parentSpanContext?.isRemote) tr.attrs["w3c.parent_span_id"] = root.parentSpanContext.spanId;
   }
 
-  /** A command (trace()) or a task (a queue's job): named as it was started, its task.* attributes kept. */
+  /**
+   * A command (trace()), a task (a queue's job) or a test: named as it was started, its task.* attributes kept (a
+   * test's test.* and code.*: which test, where).
+   */
   private finishWork(building: Building, root: ReadableSpan): void {
     const attrs = attrsOf(root);
     const tr = building.trace;
@@ -615,12 +641,13 @@ export class TracepanelProcessor implements SpanProcessor {
       rootSpan.name = tr.name;
       rootSpan.attrs = {};
     }
-    const own = Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("task.")));
+    const kept = tr.kind === "test" ? /^(test|code)\./ : /^task\./;
+    const own = Object.fromEntries(Object.entries(attrs).filter(([key]) => kept.test(key)));
     tr.attrs = {
       ...tr.attrs,
       ...own,
       "service.name": this.config.service,
-      "service.role": tr.kind === "task" ? "worker" : "command",
+      "service.role": tr.kind === "task" ? "worker" : tr.kind === "test" ? "test" : "command",
       "telemetry.sdk.language": "nodejs",
       "process.runtime.name": process.versions.bun ? "bun" : "node",
       "process.runtime.version": process.versions.bun ?? process.versions.node,

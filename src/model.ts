@@ -49,7 +49,7 @@ export interface TraceError {
 
 export interface Trace {
   id: string;
-  kind: "http" | "task" | "command";
+  kind: "http" | "task" | "command" | "test";
   name: string;
   start: number;
   duration: number;

@@ -4,6 +4,17 @@
 
 ### Added
 
+- A Vitest plugin, `@tracepanel/js/vitest`: with `plugins: [tracepanel()]`
+  each test runs as a trace, and a test fails when the agent finds an N+1 or
+  duplicate queries in it or in the requests it made, with the query, the
+  line that ran it, the hint and a link to the trace. `failOn` picks the
+  kinds that fail a test; a test's or a suite's `meta.tracepanel` changes
+  them (`allow`, `failOn`, `maxQueries`); `testTrace()` and `maxQueries()`
+  count queries inside a test. The same rules and messages as the Python
+  SDK's pytest plugin.
+- `TRACEPANEL_WIDGET=0` leaves the app's HTML pages without the widget's
+  script (the Vitest plugin turns it off).
+
 - A query made through Prisma, Drizzle, TypeORM, Sequelize, Knex or
   Mongoose names that ORM in `db.client` instead of the driver, so the
   console's N+1 hint is the ORM's own fix (`include`, `with`, `relations`,

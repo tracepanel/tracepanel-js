@@ -29,6 +29,7 @@ It runs while you develop, and everything stays on your machine.
 | **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. |
 | **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |
 | **Profiling** | Where a request's CPU time goes, on Node. |
+| **Tests** | Vitest 4.1 and later: a test fails when it makes an N+1 or duplicate queries. |
 | **Browser** | The badge and its panel on server-rendered pages, in Next.js through `<Tracepanel />` and in an SPA through the Vite plugin. The pages' views and clicks with their `fetch()` calls, linked to the API's traces. |
 
 The settings and what each integration records are in the
@@ -340,6 +341,65 @@ request it is a step. `span()` is a step of the current trace. Outside
 development they run the function and nothing else. Run a script with
 `npx tracepanel run node script.js`.
 
+## In tests
+
+The Vitest plugin turns what Tracepanel finds into test failures, so an N+1
+query fails CI before it reaches production. Add it to the Vitest config:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from "vitest/config";
+import { tracepanel } from "@tracepanel/js/vitest";
+
+export default defineConfig({
+  plugins: [tracepanel()], // or tracepanel({ failOn: ["n+1", "duplicates", "slow-sql"] })
+});
+```
+
+Each test runs as a trace named after the test, with its queries in it. A
+request the test makes of a server it started (supertest, `fetch()`) is a
+trace of its own, linked to the test's in the console. Work in `beforeAll` is
+outside every test's trace; `beforeEach` and `afterEach` run inside it.
+
+When the test passes, the agent looks at its traces. An issue of a kind in
+`failOn` (`n+1` and `duplicates` by default) fails the test with the issue,
+its query, the line of code that ran it and a link to the trace:
+
+```text
+AssertionError: tracepanel found 1 issue in this test:
+
+N+1: 4 similar queries · SELECT authors
+  SELECT name FROM authors WHERE id = $1
+  at src/books.ts:28 in listBooks
+  in GET /books → http://127.0.0.1:52068/#/t/01M60NB74Q6T9AXZGMFJ7V8FB1
+  Load the related rows with the parent rows (a join, or one batched query) instead of one query per row.
+
+The test's trace: http://127.0.0.1:52068/#/t/01M60NB74J4Q5VDHCJD1Z4T1J7
+Allowed here with the test's option { meta: { tracepanel: { allow: ["n+1"] } } }.
+```
+
+The `tracepanel` meta changes the rules for a test or a `describe()`, and
+`testTrace()` and `maxQueries()` count queries inside the test:
+
+```ts
+import { maxQueries, testTrace } from "@tracepanel/js/vitest";
+
+test("feed", { meta: { tracepanel: { maxQueries: 10, allow: ["n+1"] } } }, async () => {
+  await request(app).get("/feed");
+  expect(testTrace().queries).toBeLessThanOrEqual(10);
+  await maxQueries(2, () => request(app).get("/feed?page=2"));
+});
+```
+
+`failOn` replaces the kinds that fail the test, `allow` takes kinds out of
+them, and `maxQueries` caps the queries of the test and its requests.
+`await testTrace().issues()` lists what the agent found in the test's
+requests so far.
+
+The plugin starts the project's agent when none is running. Without an agent
+(`TRACEPANEL_AGENT=off`) the tests run without findings, and one warning says
+so. Query counts need no agent.
+
 ## The signed-in user
 
 ```js
@@ -372,6 +432,7 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_LONG_TRANSACTION_MS` | `500` | a long transaction |
 | `TRACEPANEL_QUEUE_WAIT_MS` | `1000` | a task that waited long for a worker |
 | `TRACEPANEL_LARGE_RESULT_ROWS` | `1000` | a query without a LIMIT that read too many rows |
+| `TRACEPANEL_WIDGET` | on (off in tests) | `0` leaves the app's HTML pages without the widget's script |
 | `TRACEPANEL_CAPTURE_REQUEST` | on | `0` stops keeping each request's headers, query, cookies and body |
 | `TRACEPANEL_CAPTURE_LOCALS` | on | `0` stops reading an error's local variables |
 | `TRACEPANEL_PROFILE` | off | `1` profiles every trace, not only a request that asks |

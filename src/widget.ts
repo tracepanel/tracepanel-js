@@ -49,7 +49,7 @@ export function badge(tracepanel: Runtime, request: BadgeRequest): Badge | undef
   // The console on the page's own origin, where the app serves it: the widget and the page's recording share it.
   const api = tracepanel.onOrigin?.prefix ?? consoleUrl;
   const scriptAttrs =
-    page && consoleUrl
+    page && consoleUrl && tracepanel.config.widget
       ? {
           src: `${api}widget.min.js`,
           "data-tracepanel-api": api,
