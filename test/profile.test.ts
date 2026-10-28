@@ -1,6 +1,7 @@
 // A trace's profile: where its time went in code, sampled while it runs, when the request asks or the setting says.
 // A sample taken while another trace runs too can't be told apart: it is left out, and counted.
 
+import inspector, { type Session } from "node:inspector";
 import { fileURLToPath } from "node:url";
 import { context, type Span as OtelSpan, SpanKind, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -27,6 +28,31 @@ const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
 function busy(ms: number): void {
   const until = performance.now() + ms;
   while (performance.now() < until);
+}
+
+/**
+ * Busy until the profiler has sampled the thread: a fixed time is no promise of a sample, as a busy machine can run
+ * the profiler's sampling thread too seldom (a trace with no sample sends no profile). A console profile of its own,
+ * taken by the trace's profiler while the trace runs: any sample in it is in the trace's too.
+ */
+function busyUntilSampled(processor: TracepanelProcessor): void {
+  const session = (processor as unknown as { profiler: { session: Session } }).profiler.session;
+  for (let probe = 0; ; probe++) {
+    const title = `test:sampled:${probe}`;
+    let sampled = false;
+    const finished = (message: { params: { title?: string; profile: inspector.Profiler.Profile } }) => {
+      if (message.params.title !== title) return;
+      const { nodes, samples = [] } = message.params.profile;
+      const idle = new Set(nodes.filter((node) => node.callFrame.functionName === "(idle)").map((node) => node.id));
+      sampled = samples.some((id) => !idle.has(id));
+    };
+    session.on("Profiler.consoleProfileFinished", finished);
+    inspector.console.profile(title);
+    busy(5);
+    inspector.console.profileEnd(title);
+    session.off("Profiler.consoleProfileFinished", finished);
+    if (sampled) return;
+  }
 }
 
 /** A processor of its own, with these settings, and the traces it sends. */
@@ -56,7 +82,7 @@ function app(env: Record<string, string> = {}) {
     return sent.find((done) => done.attrs["http.path"] === path) as Trace;
   }
 
-  return { start, end, tracer };
+  return { start, end, tracer, processor };
 }
 
 /** The app's functions in the profile's stacks, with the samples that saw each. */
@@ -194,8 +220,8 @@ describe("a trace's memory", () => {
     const timeOnly = app();
     const asked = timeOnly.start("/time", "1");
     loadCatalog(1000);
-    // Long enough for the profiler's samples, however busy the machine: a profile with none isn't sent.
-    busy(20);
+    // A profile with no sample isn't sent.
+    busyUntilSampled(timeOnly.processor);
     const time = await timeOnly.end(asked, "/time");
 
     expect(time.profile?.memory).toBeUndefined();
