@@ -4,6 +4,8 @@ minimumReleaseAge: 2880
 # esbuild (vitest's bundler) checks its platform binary after install.
 allowBuilds:
   esbuild: true
+  # The tests' SQLite driver: its prebuilt binary for this Node, or built from source.
+  better-sqlite3: true
   # BullMQ's msgpackr (the tests' BullMQ) works without its native extract: nothing to build.
   msgpackr-extract: false
 # Tracepanel's own packages (the agent's binaries) are released with this one.

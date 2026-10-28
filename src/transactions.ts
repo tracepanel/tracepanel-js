@@ -1,5 +1,6 @@
-// Transactions as the Python SDK records them: a `transaction` span from BEGIN (or START TRANSACTION) on a pg client
-// or a mysql2 connection to its COMMIT or ROLLBACK, a nested `savepoint` span for each SAVEPOINT. What the app does
+// Transactions as the Python SDK records them: a `transaction` span from BEGIN (or START TRANSACTION) on a pg client,
+// a mysql2 connection or a SQLite database (sqlite.ts) to its COMMIT or ROLLBACK, a nested `savepoint` span for each
+// SAVEPOINT. What the app does
 // meanwhile goes inside: the statements on that connection, and the calls it makes from where it began (an HTTP
 // call, a job enqueued), which is what the agent's long-transaction and in-transaction issues look at.
 
@@ -33,7 +34,7 @@ interface Open {
   inside: Context;
 }
 
-interface Driver {
+export interface Driver {
   client: string;
   system: string;
 }
@@ -126,6 +127,64 @@ function after(result: Any, done: () => void): void {
   }
 }
 
+/**
+ * Where a statement runs, by its text: BEGIN or SAVEPOINT opens a span and runs in it, any other in the connection's
+ * innermost transaction; COMMIT, ROLLBACK and RELEASE close what they end (`ending`, to end once it ran).
+ */
+function place(connection: Any, driver: Driver, text: string): { run: Context | undefined; ending: Open[] } {
+  let ending: Open[] = [];
+  let run: Context | undefined;
+  try {
+    if (BEGIN.test(text)) {
+      run = open(connection, driver, false)?.inside;
+    } else if (SAVEPOINT.test(text)) {
+      run = open(connection, driver, true)?.inside;
+    } else {
+      // The statement runs inside the connection's innermost transaction, whichever context it came from.
+      run = (connection?.[OPEN] as Open[] | undefined)?.at(-1)?.inside;
+      if (ROLLBACK_TO.test(text) || RELEASE.test(text)) {
+        ending = close(connection, ROLLBACK_TO.test(text) ? "rollback" : "commit", true);
+      } else if (COMMIT.test(text) || ROLLBACK.test(text)) {
+        ending = close(connection, COMMIT.test(text) ? "commit" : "rollback", false);
+      }
+    }
+  } catch {
+    // Never in the way of the app's query.
+  }
+  return { run, ending };
+}
+
+/**
+ * A statement a driver runs in the app's call (SQLite's): in the connection's transaction, which BEGIN opens and
+ * COMMIT or ROLLBACK ends as it returns.
+ */
+export function statementIn<T>(connection: Any, driver: Driver, text: string, call: () => T): T {
+  const { run, ending } = place(connection, driver, text);
+  try {
+    return run ? context.with(run, call) : call();
+  } finally {
+    end(ending);
+  }
+}
+
+/**
+ * A function the driver runs in a transaction of its own making (better-sqlite3's db.transaction()): a transaction
+ * span around it, a savepoint inside another one; committed unless it throws.
+ */
+export function within<T>(connection: Any, driver: Driver, call: () => T): T {
+  const entry = open(connection, driver, stack(connection).length > 0);
+  if (!entry) return call();
+  let outcome: "commit" | "rollback" = "rollback";
+  try {
+    const result = context.with(entry.inside, call);
+    outcome = "commit";
+    return result;
+  } finally {
+    // Only this one: the transaction it is in goes on.
+    end(close(connection, outcome, true));
+  }
+}
+
 /** Whether a wrapper is calling the statement through: the ones it calls in turn pass it on. */
 let calling = false;
 
@@ -136,26 +195,7 @@ export function wrapQuery(proto: Any, method: string, driver: Driver): void {
   const wrapped = function (this: Any, ...args: unknown[]) {
     // Another of these wrappers further in (the module hooked twice) leaves the statement to this one.
     if (calling) return original.apply(this, args);
-    const text = textOf(args[0]);
-    let ending: Open[] = [];
-    let run: Context | undefined;
-    try {
-      if (BEGIN.test(text)) {
-        run = open(this, driver, false)?.inside;
-      } else if (SAVEPOINT.test(text)) {
-        run = open(this, driver, true)?.inside;
-      } else {
-        // The statement runs inside the connection's innermost transaction, whichever context it came from.
-        run = (this?.[OPEN] as Open[] | undefined)?.at(-1)?.inside;
-        if (ROLLBACK_TO.test(text) || RELEASE.test(text)) {
-          ending = close(this, ROLLBACK_TO.test(text) ? "rollback" : "commit", true);
-        } else if (COMMIT.test(text) || ROLLBACK.test(text)) {
-          ending = close(this, COMMIT.test(text) ? "commit" : "rollback", false);
-        }
-      }
-    } catch {
-      // Never in the way of the app's query.
-    }
+    const { run, ending } = place(this, driver, textOf(args[0]));
     const call = () => {
       calling = true;
       try {

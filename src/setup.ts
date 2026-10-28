@@ -28,6 +28,7 @@ import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
 import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
 import { type Runtime, runtime } from "./runtime.js";
+import { SqliteInstrumentation } from "./sqlite.js";
 import { TransactionsInstrumentation } from "./transactions.js";
 
 export interface Options {
@@ -103,6 +104,8 @@ export function start(options: Options = {}): Runtime | undefined {
     new PrismaInstrumentation(),
     // BEGIN … COMMIT on a connection as a transaction span: after pg's and mysql2's, so its statements are inside.
     new TransactionsInstrumentation(),
+    // SQLite: better-sqlite3, node:sqlite and libsql, their transactions too.
+    new SqliteInstrumentation(),
     // Its jobs' task events too, for the console's Live list.
     new BullMQInstrumentation(tracepanel.processor),
     // The databases the app queries, for the console's EXPLAIN.

@@ -3,7 +3,9 @@
 //
 // The app's databases are the ones its queries ran on: each pg or mysql2 connection that queries is remembered by
 // its settings (the password among them), and EXPLAIN opens one of its own with them, so it never runs inside the
-// app's transaction. Whatever EXPLAIN ANALYZE does is rolled back.
+// app's transaction. Whatever EXPLAIN ANALYZE does is rolled back. A SQLite database (sqlite.ts) is explained on the
+// app's own connection, the last one that queried that file: EXPLAIN QUERY PLAN only plans, and the connection is
+// the app's thread's, between its statements.
 
 import {
   InstrumentationBase,
@@ -34,29 +36,76 @@ interface Session {
 
 /** A database the app queried: where it is, and how to open a session of its own there. */
 interface Database {
-  vendor: "postgresql" | "mysql";
+  vendor: "postgresql" | "mysql" | "sqlite";
   server: string;
   port: number;
   database: string;
   open(): Promise<Session>;
+  /** The session is the app's own connection (SQLite's): EXPLAIN runs on it as it is, no transaction around it. */
+  inPlace?: boolean;
 }
 
 const DATABASES = new Map<string, Database>();
 
-function remember(database: Database): void {
+/** The first connection to a database is remembered; a SQLite one's last, as the app may have closed the others. */
+function remember(database: Database, latest = false): void {
   const key = `${database.vendor} ${database.server}:${database.port}/${database.database}`;
-  if (!DATABASES.has(key)) DATABASES.set(key, database);
+  if (latest || !DATABASES.has(key)) DATABASES.set(key, database);
 }
 
-/** The database a span's query ran on: by vendor, server, port and name; the only one of that vendor otherwise. */
+// biome-ignore lint/suspicious/noExplicitAny: the drivers' own types are the app's, not this package's.
+const SQLITE = new WeakMap<object, any>();
+
+/**
+ * A SQLite connection that queried (better-sqlite3's, node:sqlite's, libsql's), by its file's name (`file`, none in
+ * memory). Held weakly: a connection the app lets go of is gone for EXPLAIN too.
+ */
+export function rememberSqlite(db: object, file: string | null): void {
+  const known = SQLITE.get(db);
+  if (known) {
+    if (DATABASES.get(`sqlite :0/${file ?? ""}`) !== known) remember(known, true);
+    return;
+  }
+  const connection = new WeakRef(db);
+  const database: Database = {
+    vendor: "sqlite",
+    server: "",
+    port: 0,
+    database: file ?? "",
+    inPlace: true,
+    async open() {
+      // biome-ignore lint/suspicious/noExplicitAny: the driver's own type.
+      const db = connection.deref() as any;
+      if (!db || db.open === false || db.isOpen === false) throw new Error("The app's SQLite connection is closed.");
+      return {
+        async run(sql, values) {
+          const rows: Record<string, unknown>[] = db.prepare(sql).all(...values);
+          return {
+            columns: Object.keys(rows[0] ?? {}),
+            rows: rows.map((row) => Object.values(row)),
+          };
+        },
+        async close() {},
+      };
+    },
+  };
+  SQLITE.set(db, database);
+  remember(database, true);
+}
+
+/**
+ * The database a span's query ran on: by vendor, server, port and name; the only one of that vendor otherwise. A
+ * SQLite database by its file's name, or the one in memory when the span names none.
+ */
 function databaseFor(request: ExplainRequest): Database | undefined {
   const vendor = request.vendor === "mariadb" ? "mysql" : request.vendor;
   const candidates = [...DATABASES.values()].filter((database) => database.vendor === vendor);
+  const named = vendor === "sqlite" ? (request.database ?? "") : request.database;
   const exact = candidates.find(
     (database) =>
-      (request.server == null || database.server === request.server) &&
-      (request.port == null || database.port === Number(request.port)) &&
-      (request.database == null || database.database === request.database),
+      (request.server == null || vendor === "sqlite" || database.server === request.server) &&
+      (request.port == null || vendor === "sqlite" || database.port === Number(request.port)) &&
+      (named == null || database.database === named),
   );
   return exact ?? (candidates.length === 1 ? candidates[0] : undefined);
 }
@@ -65,6 +114,7 @@ export async function explain(request: ExplainRequest): Promise<ExplainAnswer> {
   const database = databaseFor(request);
   if (!database) throw new Error(`The app has queried no ${request.vendor} database it can run EXPLAIN on.`);
   const session = await database.open();
+  if (database.inPlace) return session.run(request.sql, request.params);
   try {
     await session.run("BEGIN", []);
     return await session.run(request.sql, request.params);
