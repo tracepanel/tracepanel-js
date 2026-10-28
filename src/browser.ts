@@ -2,8 +2,12 @@
 // route change, named by its path ("/books"); an action is what the user did that called the API or threw, named
 // after it on its page ("/books › click "Save""), and "background" when nobody did anything (a timer, polling). Each
 // has its fetch() and XMLHttpRequest calls, the errors the page throws and its console, and lasts until its last call
-// answered (a view: until the page's load too). Calls to the page's own origin carry a W3C traceparent, so the agent links each to the backend's trace
-// of it. The traces go to the console's address (`api`), which the dev server serves on the page's origin.
+// answered (a view: until the page's load too). Calls to the page's own origin (and to `propagateTo`'s) carry a W3C
+// traceparent, so the agent links each to the backend's trace of it. While the panel's Profile is on (its
+// tracepanel_profile cookie, on the page's origin), those calls carry X-Tracepanel-Profile with the cookie's value
+// too ("1", or "memory"): a backend on another origin never gets the cookie, and is profiled all the same, and so is
+// each app it calls in turn. The traces go to the console's address (`api`), which the dev server serves on the
+// page's origin.
 //
 //   import { record } from "@tracepanel/js/browser";
 //   record({ api: "/__tracepanel__/", service: "shop-web" });
@@ -20,7 +24,10 @@ export interface BrowserOptions {
   api?: string;
   /** The app's name in the console. "browser" by default. */
   service?: string;
-  /** Other origins whose calls carry a traceparent (their CORS must allow the header). */
+  /**
+   * Other origins whose calls carry a traceparent, and X-Tracepanel-Profile while the panel's Profile is on: their
+   * CORS must allow both headers (`cors()` and `allow_headers=["*"]` do).
+   */
   propagateTo?: string[];
   /**
    * Scripts whose console isn't the page's, by a part of their path: a dev server's own client ("/@vite/").
@@ -124,6 +131,9 @@ const CONTROL =
   "input[type=button],input[type=checkbox],input[type=radio],select,summary,label";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const SECRET = /(token|key|secret|password|passwd|pwd|auth|signature|sig|session|credential)/i;
+// The panel's Profile toggle: its cookie on the page's origin, and the header a call asks a backend with.
+const PROFILE_COOKIE = "tracepanel_profile";
+const PROFILE_HEADER = "X-Tracepanel-Profile";
 
 function hex(bytes: number): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -168,6 +178,21 @@ function safeUrl(raw: string): URL | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** What the panel's Profile toggle asks for now: "1", "memory", or nothing while it is off. */
+function profileAsked(): string | undefined {
+  let cookies = "";
+  try {
+    cookies = document.cookie;
+  } catch {
+    // A sandboxed page has no cookies.
+  }
+  for (const pair of cookies.split(";")) {
+    const [name, value] = pair.trim().split("=", 2);
+    if (name === PROFILE_COOKIE) return value === "1" || value === "memory" ? value : undefined;
+  }
+  return undefined;
 }
 
 function clip(text: string): string {
@@ -400,7 +425,12 @@ export function record(options: BrowserOptions = {}): void {
   function call(
     method: string,
     raw: string,
-  ): { finish(status: number, failed: boolean): void; traceparent?: string | undefined; page?: string } {
+  ): {
+    finish(status: number, failed: boolean): void;
+    traceparent?: string | undefined;
+    profile?: string | undefined;
+    page?: string;
+  } {
     const url = safeUrl(raw);
     if (!url || url.toString().startsWith(api)) return { finish: () => undefined };
     const current = active();
@@ -424,8 +454,11 @@ export function record(options: BrowserOptions = {}): void {
       },
     };
     if (current.trace.spans.length < MAX_SPANS) current.trace.spans.push(span);
+    const propagated = propagate.has(url.origin);
     return {
-      traceparent: propagate.has(url.origin) ? `00-${current.w3cTraceId}-${spanId}-01` : undefined,
+      traceparent: propagated ? `00-${current.w3cTraceId}-${spanId}-01` : undefined,
+      // Where a traceparent goes, the panel's Profile asks for a profile too.
+      profile: propagated ? profileAsked() : undefined,
       page: current.trace.id,
       finish(status, failed) {
         span.duration = nowUs() - span.start;
@@ -443,6 +476,7 @@ export function record(options: BrowserOptions = {}): void {
     const out = call(request.method, request.url);
     const headers = new Headers(request.headers);
     if (out.traceparent && !headers.has("traceparent")) headers.set("traceparent", out.traceparent);
+    if (out.profile && !headers.has(PROFILE_HEADER)) headers.set(PROFILE_HEADER, out.profile);
     try {
       // Marked as it arrives, before anything else runs: a wrapper of fetch around this one (the widget's) reads the
       // mark as soon as the Response reaches it.
@@ -475,6 +509,7 @@ export function record(options: BrowserOptions = {}): void {
     if (target) {
       const out = call(target.method, target.url);
       if (out.traceparent) this.setRequestHeader("traceparent", out.traceparent);
+      if (out.profile) this.setRequestHeader(PROFILE_HEADER, out.profile);
       if (out.page) Object.defineProperty(this, PAGE, { value: out.page, configurable: true });
       this.addEventListener("loadend", () => out.finish(this.status, this.status === 0));
     }

@@ -352,8 +352,12 @@ its actions under it, and the badge's panel lists each action over the
 requests it made.
 
 A call to the page's own origin carries a W3C `traceparent`, so the console
-links it to the API's trace. `propagateTo` names other origins, whose CORS
-must allow the header:
+links it to the API's trace. While the panel's Profile toggle is on, the
+same calls carry `X-Tracepanel-Profile` (`1`, or `memory`), so an API on
+another origin, which never gets the toggle's cookie, profiles the request
+too, and so does each app it calls in turn. `propagateTo` names other
+origins, whose CORS must allow both headers (`cors()` and
+`allow_headers=["*"]` do):
 
 ```ts
 tracepanel({ dir: "../backend", browser: { service: "shop-web", propagateTo: ["http://127.0.0.1:8000"] } });
@@ -443,6 +447,11 @@ the line that ran it and the fix:
   request was the only one running, and counts the rest
   (`tracepanel.dropped_samples`). Time spent waiting on I/O is not in it.
   Every profile counts the garbage collector's runs and their pauses.
+  A request profiled because it asked asks the same of the apps it calls:
+  each call that carries a `traceparent` (fetch, node:http, axios, got)
+  carries `X-Tracepanel-Profile` too, so the panel's toggle profiles the
+  whole chain. `TRACEPANEL_PROFILE=1` asks nothing of them: each app's own
+  setting decides.
 - A profile's memory too, when asked: `X-Tracepanel-Profile: memory`, the
   `tracepanel_profile=memory` cookie (the panel's Profile toggle offers
   it), or `TRACEPANEL_PROFILE_MEMORY=1`. V8's sampling heap profiler takes

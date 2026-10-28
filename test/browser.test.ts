@@ -21,6 +21,8 @@ const PAGE = Symbol.for("tracepanel.page");
 const sent: Doc[] = [];
 const requests: Request[] = [];
 const announced: { id: string; name: string; open: boolean }[] = [];
+// The page's XMLHttpRequests: the URL each was opened for and the headers set on it, answered at once.
+const xhrs: { url: string; headers: Record<string, string> }[] = [];
 
 /** The trace named so once the recording sent it: a view or an action ends when nothing happened for a second. */
 async function sentTrace(name: string): Promise<Doc> {
@@ -51,6 +53,19 @@ beforeAll(() => {
     }
     requests.push(request);
     return new Response("{}", { status: request.url.includes("boom") ? 500 : 200 });
+  };
+  const opened = new WeakMap<XMLHttpRequest, { url: string; headers: Record<string, string> }>();
+  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, _method: string, url: string | URL) {
+    const sent = { url: String(url), headers: {} };
+    opened.set(this, sent);
+    xhrs.push(sent);
+  } as typeof XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
+    const sent = opened.get(this);
+    if (sent) sent.headers[name] = value;
+  };
+  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest) {
+    this.dispatchEvent(new Event("loadend"));
   };
   window.addEventListener("tracepanel:page", (event) => announced.push((event as CustomEvent).detail));
   // The helper's folder stands for a dev server's own scripts (/@vite/ under Vite).
@@ -124,6 +139,89 @@ test("a traceparent goes to the page's origin and to propagateTo's, not to other
   expect(requests.find((item) => item.url === "http://api.test/sync")?.headers.has("traceparent")).toBe(true);
   expect(requests.find((item) => item.url === "http://other.test/track")?.headers.has("traceparent")).toBe(false);
 });
+
+/** The panel's Profile toggle, as it sets its cookie: "1", "memory", or off. */
+function profileCookie(value: string | undefined): void {
+  // biome-ignore lint/suspicious/noDocumentCookie: the panel sets it so; the recording reads document.cookie.
+  document.cookie = value ? `tracepanel_profile=${value}; Path=/` : "tracepanel_profile=; Max-Age=0; Path=/";
+}
+
+/** The headers a call sent, by name in lower case: those the profile and the trace context ask with. */
+function asking(url: string): Record<string, string | null> {
+  const headers = requests.find((item) => item.url === url)?.headers;
+  return {
+    traceparent: headers?.has("traceparent") ? "set" : null,
+    profile: headers?.get("x-tracepanel-profile") ?? null,
+  };
+}
+
+test("while the panel's Profile is on, calls that carry a traceparent ask for a profile with its value", async () => {
+  profileCookie("1");
+  button("Profile own", "/api/profiled").click();
+  await sentTrace('/books › click "Profile own"');
+  button("Profile api", "http://api.test/profiled").click();
+  await sentTrace('/books › click "Profile api"');
+  button("Profile other", "http://other.test/profiled").click();
+  await sentTrace('/books › click "Profile other"');
+  profileCookie("memory");
+  button("Profile memory", "http://api.test/memory").click();
+  await sentTrace('/books › click "Profile memory"');
+  profileCookie(undefined);
+  button("Profile off", "http://api.test/off").click();
+  await sentTrace('/books › click "Profile off"');
+
+  expect(asking("http://app.test/api/profiled")).toEqual({ traceparent: "set", profile: "1" });
+  expect(asking("http://api.test/profiled")).toEqual({ traceparent: "set", profile: "1" });
+  expect(asking("http://other.test/profiled")).toEqual({ traceparent: null, profile: null });
+
+  expect(asking("http://api.test/memory")).toEqual({ traceparent: "set", profile: "memory" });
+
+  expect(asking("http://api.test/off")).toEqual({ traceparent: "set", profile: null });
+}, 15_000);
+
+test("a call that asks for a profile itself keeps its own ask", async () => {
+  profileCookie("memory");
+  const element = document.createElement("button");
+  element.textContent = "Own ask";
+  element.addEventListener("click", () => void fetch("/api/own-ask", { headers: { "X-Tracepanel-Profile": "1" } }));
+  document.body.append(element);
+  element.click();
+  await sentTrace('/books › click "Own ask"');
+  profileCookie(undefined);
+
+  expect(asking("http://app.test/api/own-ask")).toEqual({ traceparent: "set", profile: "1" });
+});
+
+test("an XMLHttpRequest asks as fetch() does", async () => {
+  /** A click that sends an XMLHttpRequest to `url`. */
+  const xhr = (label: string, url: string) => {
+    const element = document.createElement("button");
+    element.textContent = label;
+    element.addEventListener("click", () => {
+      const request = new XMLHttpRequest();
+      request.open("GET", url);
+      request.send();
+    });
+    document.body.append(element);
+    element.click();
+  };
+  profileCookie("memory");
+  xhr("Xhr api", "http://api.test/xhr");
+  await sentTrace('/books › click "Xhr api"');
+  xhr("Xhr other", "http://other.test/xhr");
+  await sentTrace('/books › click "Xhr other"');
+  profileCookie(undefined);
+  xhr("Xhr off", "/api/xhr");
+  await sentTrace('/books › click "Xhr off"');
+  const headers = (url: string) => {
+    const found = xhrs.find((item) => item.url === url)?.headers ?? {};
+    return { ...found, ...(found.traceparent ? { traceparent: "set" } : {}) };
+  };
+
+  expect(headers("http://api.test/xhr")).toEqual({ traceparent: "set", "X-Tracepanel-Profile": "memory" });
+  expect(headers("http://other.test/xhr")).toEqual({});
+  expect(headers("/api/xhr")).toEqual({ traceparent: "set" });
+}, 15_000);
 
 test("a call that fails fails its action", async () => {
   button("Delete", "/api/boom").click();

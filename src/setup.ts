@@ -28,6 +28,7 @@ import { PinoLogs, WinstonLogs } from "./loggers.js";
 import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
 import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
+import { profilePropagator } from "./propagation.js";
 import { traceBunQueries } from "./queries.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { SqliteInstrumentation } from "./sqlite.js";
@@ -88,7 +89,10 @@ export function start(options: Options = {}): Runtime | undefined {
   // says it is Node 26 but has no registerHooks(): supportsSyncHooks() goes by the version only.
   if (supportsSyncHooks() && typeof nodeModule.registerHooks === "function") registerSyncHooks();
   else register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
-  new NodeTracerProvider({ spanProcessors: [tracepanel.processor] }).register();
+  // OpenTelemetry's propagators, with the profile's ask: a profiled request's calls ask the next app the same.
+  new NodeTracerProvider({ spanProcessors: [tracepanel.processor] }).register({
+    propagator: profilePropagator((spanId) => tracepanel.processor.askedBy(spanId)),
+  });
   const bun = process.versions.bun !== undefined;
   const instrumentations: Instrumentation[] = [
     new ExpressInstrumentation(),
