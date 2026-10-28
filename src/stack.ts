@@ -168,6 +168,7 @@ const CALL_LAYERS = new Set([
   "@prisma",
   "@mikro-orm",
   "@redis",
+  "@sequelize",
   "@tracepanel",
   "drizzle-orm",
   "generic-pool",
@@ -194,6 +195,18 @@ const CALL_LAYERS = new Set([
   "typeorm",
 ]);
 
+// The ORMs and query builders a query goes through, by their package: what db.client names, as the Python SDK names
+// Django's and SQLAlchemy's. The agent's N+1 hint is the ORM's own way to load the related rows.
+const ORMS: Record<string, string> = {
+  "@prisma": "prisma",
+  "@sequelize": "sequelize",
+  "drizzle-orm": "drizzle",
+  knex: "knex",
+  mongoose: "mongoose",
+  sequelize: "sequelize",
+  typeorm: "typeorm",
+};
+
 /** The installed package a file is in (pg, @prisma/client's scope @prisma), or null for a file in none. */
 function packageOf(file: string): string | null {
   const at = file.lastIndexOf(`${sep}node_modules${sep}`);
@@ -213,17 +226,29 @@ function asks(file: string, root: string): boolean {
 /**
  * Where the call being made now was made. `origin`: `file:line in function` of the innermost frame of the app's own
  * code. Without one, `caller`: the library code that asked for it, the first frame past the driver, its ORM and
- * Tracepanel (`connect-pg-simple/index.js:… in PGStore.get`), as the Python SDK's code.caller names it.
+ * Tracepanel (`connect-pg-simple/index.js:… in PGStore.get`), as the Python SDK's code.caller names it. `orm`: the ORM
+ * the call went through (`prisma`, `drizzle`), its innermost frame's, or null for a driver called directly.
  */
-export function madeAt(root: string): { origin: string | null; caller: string | null } {
+export function madeAt(root: string): { origin: string | null; caller: string | null; orm: string | null } {
   const stack = parseStack(deepStack());
+  const ormFrame = stack.find((frame) => ormOf(frame.file) !== null);
+  const orm = ormFrame ? ormOf(ormFrame.file) : null;
   const own = stack.find((frame) => inApp(frame.file, root));
-  if (own) return { origin: `${relative(root, own.file)}:${own.line} in ${shortName(own.function)}`, caller: null };
+  if (own) {
+    return { origin: `${relative(root, own.file)}:${own.line} in ${shortName(own.function)}`, caller: null, orm };
+  }
   const asked = stack.find((frame) => asks(frame.file, root));
   return {
     origin: null,
     caller: asked ? `${libraryPath(asked.file)}:${asked.line} in ${shortName(asked.function)}` : null,
+    orm,
   };
+}
+
+/** The ORM whose package a file is in, as db.client names it, or null. */
+function ormOf(file: string): string | null {
+  const name = packageOf(file);
+  return name !== null && Object.hasOwn(ORMS, name) ? (ORMS[name] ?? null) : null;
 }
 
 function shortName(fn: string): string {

@@ -41,6 +41,8 @@ interface Building {
   origins: Map<string, string | null>;
   /** OTel span id: the library code that asked for a call none of the app's code was on the stack of. */
   callers: Map<string, string>;
+  /** The ORM a span's call went through (db.client), by the span's id. */
+  orms: Map<string, string>;
   queries: number;
   dbTime: number;
   framework: string;
@@ -72,6 +74,8 @@ interface Building {
    * connection checkout before it started right in the app's call.
    */
   lastOrigin: string | null;
+  /** The ORM the app's last call went through, with lastOrigin. */
+  lastOrm: string | null;
   /** The trace's profile while it runs, when it is profiled. */
   recording?: Recording | undefined;
 }
@@ -200,9 +204,16 @@ export class TracepanelProcessor implements SpanProcessor {
     }
     if (!building) return;
     this.owner.set(context.spanId, building);
-    const { origin: found, caller } = madeAt(this.config.root);
-    if (found) building.lastOrigin = found;
+    const { origin: found, caller, orm: ormHere } = madeAt(this.config.root);
+    // A driver's call made in a callback (pg-pool's query, once it has a connection) has neither the app's frames nor
+    // its ORM's on the stack: it went through the ORM of the app's last call, as it was made where that one was.
+    const orm = found ? ormHere : (ormHere ?? building.lastOrm);
+    if (found) {
+      building.lastOrigin = found;
+      building.lastOrm = ormHere;
+    }
     if (caller) building.callers.set(context.spanId, caller);
+    if (orm) building.orms.set(context.spanId, orm);
     const attrs = attrsOf(span);
     if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
@@ -407,6 +418,7 @@ export class TracepanelProcessor implements SpanProcessor {
       ids: new Map(),
       origins: new Map(),
       callers: new Map(),
+      orms: new Map(),
       queries: 0,
       dbTime: 0,
       framework: "node:http",
@@ -422,6 +434,7 @@ export class TracepanelProcessor implements SpanProcessor {
       passedOrigins: new Map(),
       parents: new Map(),
       lastOrigin: null,
+      lastOrm: null,
     };
   }
 
@@ -447,6 +460,7 @@ export class TracepanelProcessor implements SpanProcessor {
     // A database call none of the app's code made: the library code that asked for it, as the Python SDK records it.
     const caller = building.callers.get(context.spanId);
     const asked = codeOrigin === null && caller ? { "code.caller": caller } : {};
+    const orm = building.orms.get(context.spanId);
     const sql = isRedis(attrs) || isMongo(attrs) ? "" : statementOf(attrs);
     if (root) {
       converted.kind = { http: "http", task: "task.run", command: "command" }[building.trace.kind];
@@ -483,14 +497,14 @@ export class TracepanelProcessor implements SpanProcessor {
       const call = mongoCall(attrs, span.name);
       converted.kind = "mongodb";
       converted.name = call.name;
-      converted.attrs = { ...call.attrs, "code.origin": codeOrigin, ...asked };
+      converted.attrs = { ...call.attrs, ...(orm ? { "db.client": orm } : {}), "code.origin": codeOrigin, ...asked };
     } else if (span.name === "prisma:client:operation") {
       converted.name = `prisma ${attrs.model ? `${attrs.model}.` : ""}${attrs.method ?? "operation"}`;
       converted.attrs = { "code.origin": codeOrigin, ...asked };
     } else if (sql) {
       converted.kind = "sql";
       converted.name = spanName(sql);
-      converted.attrs = { ...this.sqlAttrs(attrs, sql, codeOrigin), ...asked };
+      converted.attrs = { ...this.sqlAttrs(attrs, sql, codeOrigin, orm), ...asked };
       building.queries += 1;
       building.dbTime += converted.duration;
     } else if (span.kind === SpanKind.CLIENT && first(attrs, "http.request.method", "http.method")) {
@@ -506,7 +520,8 @@ export class TracepanelProcessor implements SpanProcessor {
     this.collectErrors(building, span, id);
   }
 
-  private sqlAttrs(attrs: Attrs, sql: string, codeOrigin: string | null): Attrs {
+  /** A statement's attributes. `orm`: the ORM it went through, which db.client names instead of the driver. */
+  private sqlAttrs(attrs: Attrs, sql: string, codeOrigin: string | null, orm?: string): Attrs {
     const system = String(first(attrs, "db.system.name", "db.system") ?? "");
     // pg reports the parameters with enhancedDatabaseReporting: the same statement with the same values is a
     // duplicate, the same statement with other values an N+1 candidate.
@@ -515,7 +530,7 @@ export class TracepanelProcessor implements SpanProcessor {
     const params = Array.isArray(values) ? values : system === "mysql" ? [] : undefined;
     return {
       ...(params ? { "db.params": params } : {}),
-      "db.client": system === "postgresql" ? "pg" : system,
+      "db.client": orm ?? (system === "postgresql" ? "pg" : system),
       "db.system": system,
       "db.vendor": system,
       "db.alias": "default",

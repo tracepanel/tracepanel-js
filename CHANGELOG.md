@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- A query made through Prisma, Drizzle, TypeORM, Sequelize, Knex or
+  Mongoose names that ORM in `db.client` instead of the driver, so the
+  console's N+1 hint is the ORM's own fix (`include`, `with`, `relations`,
+  `populate()`…) once `@tracepanel/agent` has those hints.
+
 ### Fixed
 
 - With `TRACEPANEL_PROFILE=1` the hello says every trace is profiled
