@@ -12,6 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
+import { wrapQuery } from "../src/transactions.js";
 import { underLibrary } from "./app/shop.js";
 
 const APP = new URL("./app/", import.meta.url).pathname.slice(0, -1);
@@ -21,6 +22,8 @@ const processor = new TracepanelProcessor(config, { submit: (made) => sent.push(
 const provider = new BasicTracerProvider({ spanProcessors: [processor] });
 const manager = new AsyncLocalStorageContextManager().enable();
 context.setGlobalContextManager(manager);
+// The transaction spans' tracer is the global one.
+trace.setGlobalTracerProvider(provider);
 const tracer = provider.getTracer("test");
 
 afterAll(() => manager.disable());
@@ -81,6 +84,28 @@ install("drizzle-orm/node-postgres/session.js", [
   "}",
   "module.exports = NodePgPreparedQuery;",
 ]);
+// The adapter begins an interactive transaction ($transaction(async (tx) => ...)) on a client of its pool.
+install("pg/client.js", [
+  "class Client {",
+  "  constructor(tracer) {",
+  "    this.tracer = tracer;",
+  "  }",
+  "  query(sql) {",
+  '    const attributes = { "db.system": "postgresql", "db.statement": sql };',
+  '    this.tracer.startSpan("pg.query", { kind: 2, attributes }).end();',
+  "    return Promise.resolve();",
+  "  }",
+  "}",
+  "module.exports = Client;",
+]);
+install("@prisma/adapter-pg/transaction.js", [
+  'const Client = require("pg/client.js");',
+  "exports.startTransaction = async (tracer) => {",
+  "  const client = new Client(tracer);",
+  '  await client.query("BEGIN");',
+  "  return client;",
+  "};",
+]);
 install("mongoose/lib/query.js", [
   'const mongodb = require("mongodb");',
   "class Query {",
@@ -98,6 +123,11 @@ const NodePgPreparedQuery = load("drizzle-orm/node-postgres/session.js") as new 
 };
 const NodePgSession = load("drizzle-orm/node-postgres/driver.js") as new () => {
   execute(tracer: Tracer, sql: string): void;
+};
+const Client = load("pg/client.js") as { prototype: object };
+wrapQuery(Client.prototype, "query", { client: "pg", system: "postgresql" });
+const prismaTransaction = load("@prisma/adapter-pg/transaction.js") as {
+  startTransaction(tracer: Tracer): Promise<{ query(sql: string): Promise<void> }>;
 };
 const Query = load("mongoose/lib/query.js") as new () => { exec(tracer: Tracer): void };
 
@@ -170,6 +200,23 @@ describe("db.client", () => {
       "db.params_hash": null,
       "server.address": null,
       "server.port": null,
+      "code.origin": ORIGIN,
+    });
+  });
+
+  it("is prisma for a transaction Prisma's driver adapter began", async () => {
+    const made = await request(async () => {
+      const client = await underLibrary(() => prismaTransaction.startTransaction(tracer));
+      await client.query("COMMIT");
+    });
+
+    expect(made.spans.find((span) => span.kind === "transaction")?.attrs).toEqual({
+      "db.client": "prisma",
+      "db.system": "postgresql",
+      "db.vendor": "postgresql",
+      "db.alias": "default",
+      "db.transaction.savepoint": false,
+      "db.transaction.outcome": "commit",
       "code.origin": ORIGIN,
     });
   });

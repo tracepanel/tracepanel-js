@@ -10,6 +10,7 @@ import {
   InstrumentationNodeModuleDefinition,
   InstrumentationNodeModuleFile,
 } from "@opentelemetry/instrumentation";
+import { enter, QUERY_ORIGIN } from "./queries.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: the drivers' own types are the app's, not this package's.
 type Any = any;
@@ -40,17 +41,6 @@ export interface Driver {
 }
 
 const tracer = trace.getTracer("tracepanel-transactions");
-
-/**
- * The app's context from here on, as `await client.query("BEGIN")` returns: what the global context manager's
- * attach() does (AsyncLocalStorage's enterWith). A context manager without it leaves the app's context as it is.
- */
-function enter(target: Context): void {
-  const manager = (
-    context as unknown as { _getContextManager?(): { attach?(ctx: Context): unknown } }
-  )._getContextManager?.();
-  manager?.attach?.(target);
-}
 
 function textOf(query: unknown): string {
   if (typeof query === "string") return query;
@@ -140,8 +130,11 @@ function place(connection: Any, driver: Driver, text: string): { run: Context | 
     } else if (SAVEPOINT.test(text)) {
       run = open(connection, driver, true)?.inside;
     } else {
-      // The statement runs inside the connection's innermost transaction, whichever context it came from.
-      run = (connection?.[OPEN] as Open[] | undefined)?.at(-1)?.inside;
+      // The statement runs inside the connection's innermost transaction, whichever context it came from, made
+      // where the app's ORM call it came from was (queries.ts).
+      const inside = (connection?.[OPEN] as Open[] | undefined)?.at(-1)?.inside;
+      const made = context.active().getValue(QUERY_ORIGIN);
+      run = inside && made ? inside.setValue(QUERY_ORIGIN, made) : inside;
       if (ROLLBACK_TO.test(text) || RELEASE.test(text)) {
         ending = close(connection, ROLLBACK_TO.test(text) ? "rollback" : "commit", true);
       } else if (COMMIT.test(text) || ROLLBACK.test(text)) {

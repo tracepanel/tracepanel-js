@@ -72,6 +72,22 @@
 
 - With `TRACEPANEL_PROFILE=1` the hello says every trace is profiled
   (`profile_all`), so the console's Profile button shows on.
+- On Bun, a Drizzle query has the app's line in `code.origin` and `drizzle`
+  in `db.client`, so its N+1 queries and duplicates are found. Bun's stacks
+  have no async frames: the query took no line, and inside
+  `db.transaction()` the transaction's line. The line is now taken as the
+  app calls Drizzle.
+- On Bun, `code.caller` never names Tracepanel's own code: Bun maps its
+  frames back to the package's sources, which counted as library code.
+- What a Prisma interactive transaction's callback does, its HTTP calls
+  and jobs too, is inside the transaction span, so the console finds an
+  HTTP call inside a transaction. The transaction span names `prisma` in
+  `db.client`, as Drizzle's names `drizzle`.
+- A query on a schema-qualified table is named after the table: Prisma's
+  `FROM "public"."category"` is `SELECT category`, not `SELECT public`.
+  MySQL's backquotes and SQL Server's brackets as well.
+- A MongoDB command's sort shows as the app wrote it (`"sort":{"asked":-1}`),
+  not as `{}`.
 
 ## 0.5.0 (2026-10-26)
 
