@@ -6,6 +6,9 @@ import { dirname, join } from "node:path";
 
 const PACKAGES: Record<string, string> = {
   Express: "express",
+  Fastify: "fastify",
+  Hono: "hono",
+  Koa: "koa",
   NestJS: "@nestjs/core",
   "Next.js": "next",
   Nuxt: "nuxt",

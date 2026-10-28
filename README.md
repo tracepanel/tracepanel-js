@@ -21,7 +21,7 @@ It runs while you develop, and everything stays on your machine.
 | | Supported |
 | --- | --- |
 | **Runtimes** | Node.js 20.19 and later, tested in CI on 20.19, 22, 24 and 26. Bun. |
-| **Frameworks** | Express 4.18 and later, NestJS on Express, Next.js in its Node.js runtime, Nuxt, and `Bun.serve`. On Bun also any fetch handler, such as Hono's or Elysia's. Any other server on Node's `node:http` at the request level. |
+| **Frameworks** | Express 4.18 and later, Fastify 5, Koa 3 with `@koa/router`, Hono 4.8 and later on Node and on Bun, NestJS on Express, Next.js in its Node.js runtime, Nuxt, and `Bun.serve`. On Bun also any fetch handler, such as Elysia's. Any other server on Node's `node:http` at the request level. |
 | **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. SQLite through `better-sqlite3`, `node:sqlite` and `libsql`. Transactions and their savepoints. EXPLAIN on PostgreSQL, MySQL and SQLite. |
 | **Redis and MongoDB** | `ioredis` and `redis`, and the MongoDB driver, with their own N+1 and duplicates. |
 | **HTTP clients** | `fetch()`, and `node:http` clients such as axios, on Node and on Bun. |
@@ -91,6 +91,85 @@ await import("./server.js");
 ```
 
 The agent starts by itself either way, on the app's first request.
+
+### Fastify
+
+Load Tracepanel before the app as for Express, and register the plugin
+before the routes, so it sees each one as it is added:
+
+```bash
+node --import @tracepanel/js/register server.js
+```
+
+```js
+import Fastify from "fastify";
+import { tracepanel } from "@tracepanel/js/fastify";
+
+const app = Fastify();
+await app.register(tracepanel());
+app.get("/books/:id", async (request) => findBook(request.params.id));
+```
+
+Each request is named by its route (`GET /books/:id`), and its handler is a
+step of its own, with the line that added the route. HTML pages get the
+badge, sent whole or streamed. An error Fastify answers with a 500 is the
+request's error, with its local variables; one it answers below 500, such
+as a validation error or a `statusCode: 404`, is the response.
+
+### Koa
+
+Load Tracepanel before the app as for Express, and add the middleware first:
+
+```bash
+node --import @tracepanel/js/register server.js
+```
+
+```js
+import Koa from "koa";
+import Router from "@koa/router";
+import { tracepanel } from "@tracepanel/js/koa";
+
+const app = new Koa();
+app.use(tracepanel());
+const router = new Router();
+router.get("/books/:id", async (ctx) => {
+  ctx.body = await findBook(ctx.params.id);
+});
+app.use(router.routes());
+```
+
+Each `@koa/router` route's handler is a step named by its route, and so is
+the request, nested routers' prefixes included. The badge goes on HTML pages,
+and on the answer Koa gives an error. `ctx.throw(404)` is the response, not
+an error.
+
+### Hono
+
+On Node, serve the app with `@hono/node-server`, load Tracepanel before it,
+and add the middleware first:
+
+```bash
+node --import @tracepanel/js/register server.js
+```
+
+```js
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { tracepanel } from "@tracepanel/js/hono";
+
+const app = new Hono();
+app.use(tracepanel());
+app.get("/books/:id", async (c) => c.json(await findBook(c.req.param("id"))));
+serve({ fetch: app.fetch });
+```
+
+Each request is named by its route, a sub-app's base path included, and its
+handler is a step of its own. HTML pages get the badge, and the request's
+body goes into its trace as far as the handler read it. An `HTTPException`
+below 500, or what `app.onError` answers below 500, is the response.
+
+On Bun, add the same middleware and serve the app with `serve()` from
+`@tracepanel/js/bun` (see Bun below), which puts the badge on the response.
 
 ### NestJS
 
@@ -185,7 +264,9 @@ badge on server-rendered pages, and records the errors h3 answers with a 500.
 ### Bun
 
 `serve()` is `Bun.serve` with each route traced under its pattern, and
-`withTracepanel()` wraps any fetch handler, such as Hono's `app.fetch`:
+`withTracepanel()` wraps any fetch handler, such as Elysia's `handle`. A Hono
+app is `serve({ fetch: app.fetch })`, with its `tracepanel()` middleware (see
+Hono above) naming its routes:
 
 ```bash
 bun --preload @tracepanel/js/register server.ts

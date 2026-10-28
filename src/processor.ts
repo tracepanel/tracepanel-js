@@ -27,6 +27,7 @@ import { ASKED, ATTRIBUTE, asking, available, Profiler, type Recording, wanted }
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, madeAt } from "./stack.js";
 import { CONTROL } from "./transactions.js";
+import { VIEW } from "./view.js";
 
 /** Where a trace goes once its request ends. */
 export interface Sink {
@@ -94,6 +95,8 @@ const LATE_SPANS_MS = 25;
 // after this long, so the open traces don't grow for ever.
 const ABANDONED_MS = 10 * 60 * 1000;
 
+// What serves a request, below the framework that answers it.
+const SERVERS = new Set(["node:http", "Bun.serve"]);
 // Spans that are bookkeeping, not work: Express's middleware and routers, a driver's connection checkouts, and
 // Nest's inner handler span (the same call as its request context span, which names the controller).
 const SKIPPED_EXPRESS = new Set(["middleware", "router"]);
@@ -414,10 +417,13 @@ export class TracepanelProcessor implements SpanProcessor {
     else trace.logs.push({ ...log, span_id: current.spanId });
   }
 
-  /** The framework the active request runs on, unless a more specific one (Nest on Express) already said so. */
+  /**
+   * The framework the active request runs on, unless a more specific one (Nest on Express) already said so. A server
+   * (Node's, Bun.serve) gives way to the framework on it (Hono).
+   */
   setFramework(name: string): void {
     const current = this.current();
-    if (current && current.building.framework === "node:http") current.building.framework = name;
+    if (current && SERVERS.has(current.building.framework)) current.building.framework = name;
   }
 
   /** The route pattern the framework matched, when the root span doesn't carry one (Nitro). */
@@ -509,6 +515,12 @@ export class TracepanelProcessor implements SpanProcessor {
     } else if (attrs["express.type"] === "request_handler") {
       converted.kind = "view";
       converted.name = String(attrs["express.name"] ?? span.name);
+      building.trace.attrs["code.view"] = converted.name;
+    } else if (attrs["tracepanel.span_kind"] === VIEW) {
+      // A route's handler in Fastify, Koa or Hono (view.ts): named by its route, where the app added it if known.
+      converted.kind = "view";
+      converted.name = String(attrs["code.view"] ?? span.name);
+      converted.attrs = attrs["code.origin"] ? { "code.origin": attrs["code.origin"] } : {};
       building.trace.attrs["code.view"] = converted.name;
     } else if (NEXT_HANDLERS.has(String(attrs["next.span_type"]))) {
       converted.kind = "view";

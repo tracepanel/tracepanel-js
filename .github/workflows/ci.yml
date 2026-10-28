@@ -81,3 +81,5 @@ jobs:
           "
       # Bun.serve's own requests: their bodies read through the tap, the handler getting every byte.
       - run: bun test/bun/body.ts
+      # Hono on Bun: its middleware names the route, serve() marks the response once.
+      - run: bun test/bun/hono.ts

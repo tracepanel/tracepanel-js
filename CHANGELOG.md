@@ -4,6 +4,22 @@
 
 ### Added
 
+- Fastify, Koa and Hono on Node, as Express is: `@tracepanel/js/fastify`
+  (`await app.register(tracepanel())`), `@tracepanel/js/koa` and
+  `@tracepanel/js/hono` (`app.use(tracepanel())`). Each request is named by
+  its route (`GET /books/:id`, a plugin's prefix, a nested router's or a
+  sub-app's base path included), and its handler is a step of its own, in
+  Fastify with the line that added the route. HTML pages get the badge,
+  sent whole or streamed, and every response the trace's headers; a
+  redirect that answers a form sets the cookie for the next page's panel.
+  What the request carried goes into its trace: headers, query, cookies,
+  the body as the framework's parser or the handler read it, and the
+  session in Fastify (`request.session`) and Koa (`ctx.session`).
+  An error answered with a 500 is the request's, with its local variables;
+  one answered below 500 (`ctx.throw(404)`, an `HTTPException`, a
+  validation error) is the response. On Bun, Hono's middleware names the
+  routes under `serve()`, and the console shows Hono rather than Bun.serve.
+
 - A Vitest plugin, `@tracepanel/js/vitest`: with `plugins: [tracepanel()]`
   each test runs as a trace, and a test fails when the agent finds an N+1 or
   duplicate queries in it or in the requests it made, with the query, the
