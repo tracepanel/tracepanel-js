@@ -17,10 +17,12 @@ import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-middle/register-hooks.mjs";
+import { awsInstrumentation } from "./aws.js";
 import { BullMQInstrumentation } from "./bullmq.js";
 import { captureConsole } from "./console.js";
 import { DatabasesInstrumentation } from "./explain.js";
 import { traceFetch } from "./fetch.js";
+import { LlmInstrumentation, traceLlmFetch } from "./llm.js";
 import { PinoLogs, WinstonLogs } from "./loggers.js";
 import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
@@ -105,6 +107,10 @@ export function start(options: Options = {}): Runtime | undefined {
     new BullMQInstrumentation(tracepanel.processor),
     // The databases the app queries, for the console's EXPLAIN.
     new DatabasesInstrumentation(),
+    // The AWS SDK's clients: each command a call to AWS (S3 a storage call, DynamoDB a datastore's).
+    awsInstrumentation(),
+    // OpenAI's and Anthropic's clients: each call to a model an LLM call.
+    new LlmInstrumentation(),
     // fetch(): Node's own, through undici (Bun's: traceBunCalls() below).
     ...(bun ? [] : [new UndiciInstrumentation()]),
     // Outgoing calls through node:http (axios, got) always; the server's requests unless the framework traces them.
@@ -127,6 +133,8 @@ export function start(options: Options = {}): Runtime | undefined {
   // fetch and node:http have no instrumentation that sees them: their calls are traced here.
   if (bun) traceBunCalls();
   else traceFetch(tracepanel.config.root);
+  // Calls to a model's API through fetch() (the AI SDK's providers): around the call's own span.
+  traceLlmFetch();
   captureConsole(tracepanel.processor);
   return tracepanel;
 }

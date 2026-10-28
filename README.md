@@ -25,6 +25,8 @@ It runs while you develop, and everything stays on your machine.
 | **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. Transactions and their savepoints. EXPLAIN on PostgreSQL and MySQL. |
 | **Redis and MongoDB** | `ioredis` and `redis`, and the MongoDB driver, with their own N+1 and duplicates. |
 | **HTTP clients** | `fetch()`, and `node:http` clients such as axios, on Node and on Bun. |
+| **AWS** | The AWS SDK's v3 clients (`@aws-sdk/client-*`): S3 as storage calls, DynamoDB commands with their N+1 and duplicates, SQS and SNS messages, and every other service's calls, with their errors and retries. |
+| **LLMs** | OpenAI's and Anthropic's SDKs, and the AI SDK's OpenAI and Anthropic providers: each call's model, tokens, cost, time to the first chunk of a stream, and errors. |
 | **Background jobs** | BullMQ: each job a worker runs is a task, each job the app adds a step, and the jobs in flight are listed live. |
 | **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. |
 | **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |

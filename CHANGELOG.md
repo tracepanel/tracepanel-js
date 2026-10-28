@@ -26,6 +26,19 @@
   hundred MB). Not on Bun.
 - Every profile counts the garbage collector's runs and their pauses
   (`gc`), for the trace header and the time strip.
+- AWS: each command the AWS SDK's v3 clients send is a call on the
+  console's AWS page, as the Python SDK records boto3's. S3 calls are
+  storage calls with the bucket and key, DynamoDB commands datastore calls
+  with their shape and values (N+1 and duplicates), SQS's SendMessage and
+  SNS's Publish messages sent, and any other service's calls RPC calls,
+  with the region, AWS's error code and the SDK's retries. Through
+  OpenTelemetry's AWS SDK instrumentation, installed with this package.
+- LLM calls: each call to a model through OpenAI's SDK (chat completions,
+  responses, embeddings), Anthropic's (messages) or the AI SDK's OpenAI and
+  Anthropic providers is a call on the console's LLM page, as the Python
+  SDK records them: the model asked for and the one that answered, the
+  tokens with what the cache served, the finish reasons, the tools called,
+  a stream's time to its first chunk, and the error of a failed call.
 
 - A query made through Prisma, Drizzle, TypeORM, Sequelize, Knex or
   Mongoose names that ORM in `db.client` instead of the driver, so the

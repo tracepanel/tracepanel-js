@@ -5,10 +5,12 @@ import { createHash } from "node:crypto";
 import { type Context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { ReadableSpan, Span as SdkSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { TaskEvent } from "./agent.js";
+import { awsCall, isAws } from "./aws.js";
 import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
 import { CALL_ORIGIN } from "./fetch.js";
 import { withVersion } from "./frameworks.js";
+import { ANTHROPIC_SCOPE, KIND as LLM } from "./llm.js";
 import { Locals } from "./locals.js";
 import {
   type Attrs,
@@ -150,7 +152,9 @@ function skipped(span: ReadableSpan | SdkSpan): boolean {
     SKIPPED_EXPRESS.has(String(attrs["express.type"])) ||
     SKIPPED_NEST.has(String(attrs["nestjs.type"])) ||
     SKIPPED_NEXT.has(String(attrs["next.span_type"])) ||
-    SKIPPED_NAMES.test(span.name)
+    SKIPPED_NAMES.test(span.name) ||
+    // Anthropic's SDK's own span of a call: the LLM call's span (llm.ts) is the call.
+    (span as ReadableSpan).instrumentationScope?.name.startsWith(ANTHROPIC_SCOPE) === true
   );
 }
 
@@ -516,6 +520,15 @@ export class TracepanelProcessor implements SpanProcessor {
       converted.kind = "transaction";
       const { "tracepanel.span_kind": _, ...own } = attrs;
       converted.attrs = { ...own, "code.origin": codeOrigin, ...asked };
+    } else if (attrs["tracepanel.span_kind"] === LLM) {
+      converted.kind = LLM;
+      const { "tracepanel.span_kind": _, ...own } = attrs;
+      converted.attrs = { ...own, "code.origin": codeOrigin };
+    } else if (isAws(attrs)) {
+      const call = awsCall(attrs);
+      converted.kind = call.kind;
+      converted.name = call.name;
+      converted.attrs = { ...call.attrs, "code.origin": codeOrigin };
     } else if (isRedis(attrs)) {
       const call = redisCall(attrs, span.name);
       converted.kind = "redis";
