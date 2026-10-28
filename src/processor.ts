@@ -24,7 +24,7 @@ import {
   type Span,
   type Trace,
 } from "./model.js";
-import { ASKED, ATTRIBUTE, asking, available, Profiler, type Recording, wanted } from "./profile.js";
+import { ASKED, type Asked, ATTRIBUTE, asking, available, Profiler, type Recording, wanted } from "./profile.js";
 import { QUERY_ORIGIN, type QueryOrigin } from "./queries.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, madeAt } from "./stack.js";
@@ -92,6 +92,11 @@ interface Building {
   lastOrm: string | null;
   /** The trace's profile while it runs, when it is profiled. */
   recording?: Recording | undefined;
+  /**
+   * What its request asked for, when that profiles it: its calls to other apps ask the same (propagation.ts). Not
+   * set for a trace the `profile` setting profiles: each app's own setting says whether it profiles every trace.
+   */
+  asked?: Asked | undefined;
 }
 
 // A request's span can end after the response does (Express ends an async handler's span when its promise settles):
@@ -234,6 +239,8 @@ export class TracepanelProcessor implements SpanProcessor {
       const asked = asking(rootAttrs[ATTRIBUTE]) ?? asking(parentContext.getValue(ASKED));
       const mode = this.profiler ? wanted(this.config, asked) : undefined;
       if (mode) building.recording = this.profiler?.start(building, mode === "memory");
+      // "memory" goes on as asked, though this runtime may profile the time only: the next app may count it.
+      if (mode && asked) building.asked = asked;
     }
     if (!building) return;
     this.owner.set(context.spanId, building);
@@ -362,6 +369,11 @@ export class TracepanelProcessor implements SpanProcessor {
   }
 
   /** The trace being built from an OTel span, while it is: a test's, its spans so far. */
+  /** What the trace of this OTel span asked to be profiled for, when its request's ask profiles it. */
+  askedBy(spanId: string): Asked | undefined {
+    return this.owner.get(spanId)?.asked;
+  }
+
   openTrace(spanId: string): Trace | undefined {
     return this.owner.get(spanId)?.trace;
   }

@@ -17,6 +17,17 @@
   a `GraphQLError` the app answers with, and a client's syntax or
   validation error, are not.
 
+- The panel's Profile toggle profiles the whole chain of a request. The
+  browser recording's calls that carry a `traceparent` (to the page's
+  origin and to `propagateTo`'s) carry `X-Tracepanel-Profile: 1` (or
+  `memory`) while the toggle is on, so a BFF on another origin, which never
+  gets the toggle's cookie, is profiled; and a request profiled because it
+  asked (the header, the cookie) forwards the same header on each call that
+  carries its `traceparent` (fetch, node:http, axios, got, Bun's calls), so
+  every app down the chain is. A trace that `TRACEPANEL_PROFILE=1` profiles
+  forwards nothing. Other origins' CORS must allow the header, as it allows
+  `traceparent`.
+
 ### Fixed
 
 - Express: a handler that writes its headers itself with `res.writeHead()`
