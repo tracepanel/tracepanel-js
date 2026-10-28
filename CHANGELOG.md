@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-10-28)
+
+Needs `@tracepanel/agent` 0.6.0 (installed with it). Its N+1 hint is the
+ORM's own fix for Prisma, Drizzle, TypeORM, Sequelize, Knex and Mongoose,
+which this SDK now names. Its MCP server reads profiles: `get_profile` gives
+a profiled trace's CPU or memory profile as text, `get_trace` says when a
+trace was profiled, and `compare_traces` shows how the profile changed, so
+an AI coding agent can profile a request, fix the code and check the result
+without the console.
 
 ### Added
 
