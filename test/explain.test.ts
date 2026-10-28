@@ -118,7 +118,7 @@ test("the agent's EXPLAIN runs on a session of the app's database, rolled back, 
   const answer = await answered;
 
   // It keeps what each request carried and profiles a request that asks, as it does unless turned off.
-  expect(hello).toMatchObject({ service: "shop", capabilities: ["explain", "request", "profile"] });
+  expect(hello).toMatchObject({ service: "shop", capabilities: ["explain", "request", "profile", "profile_memory"] });
   expect(answer).toEqual({ answer: 7, columns: ["QUERY PLAN"], rows: [["Seq Scan on books"]] });
   // On a session of its own, with the app's settings, inside a transaction it rolls back.
   expect(FakeClient.ran.slice(1)).toEqual([

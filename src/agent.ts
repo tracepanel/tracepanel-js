@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { Config } from "./config.js";
 import { type ExplainRequest, explain } from "./explain.js";
 import type { Trace } from "./model.js";
-import { available as canProfile } from "./profile.js";
+import { available as canProfile, memoryProfiling } from "./profile.js";
 
 const PROTOCOL = 1;
 const QUEUE_SIZE = 1000;
@@ -142,8 +142,9 @@ export function sends(name: string): void {
  * The first line to the agent: it finds the issues with this project's limits. What the app offers the console, said
  * here only: it can EXPLAIN a query on its database, its traces hold what each request carried while that is kept,
  * and a request that asks is profiled while profiling is on (the console's Profile toggle shows then), every trace
- * when TRACEPANEL_PROFILE=1 says so (`profile_all`: the toggle shows on); and what it sends besides traces
- * (`live_tasks`). No `profile_memory`: the SDK has no memory profiler.
+ * when TRACEPANEL_PROFILE=1 says so (`profile_all`: the toggle shows on), with its memory when a request asks on Node
+ * (`profile_memory`), every profiled trace's when TRACEPANEL_PROFILE_MEMORY=1 (`profile_memory_all`); and what it
+ * sends besides traces (`live_tasks`).
  */
 export function hello(config: Config): Record<string, unknown> {
   return {
@@ -155,6 +156,9 @@ export function hello(config: Config): Record<string, unknown> {
       "explain",
       ...(config.captureRequest ? ["request"] : []),
       ...(config.profileEnabled && canProfile() ? ["profile", ...(config.profile ? ["profile_all"] : [])] : []),
+      ...(config.profileEnabled && memoryProfiling()
+        ? ["profile_memory", ...(config.profileMemory ? ["profile_memory_all"] : [])]
+        : []),
       ...[...SENDS].sort(),
     ],
   };

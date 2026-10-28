@@ -70,6 +70,20 @@ export interface Profile {
   samples: number;
   frames: ProfileFrame[];
   stacks: { frames: number[]; count: number }[];
+  /** What its code allocated, when its memory was asked for (memory.ts). */
+  memory?: ProfileMemory;
+  /** The garbage collector's runs while it ran. */
+  gc?: { collections: number; pause_us: number; pauses: [number, number, number][] };
+}
+
+export interface ProfileMemory {
+  peak: number;
+  net: number;
+  allocated?: number;
+  /** Where the memory was at `sites_at`, largest first: each site's frames as indexes into the profile's. */
+  sites: { frames: number[]; bytes: number; count: number }[];
+  sites_at: "peak" | "end";
+  shared: boolean;
 }
 
 export interface ProfileFrame {

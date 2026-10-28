@@ -28,7 +28,7 @@ It runs while you develop, and everything stays on your machine.
 | **Background jobs** | BullMQ: each job a worker runs is a task, each job the app adds a step, and the jobs in flight are listed live. |
 | **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. |
 | **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |
-| **Profiling** | Where a request's CPU time goes, on Node. |
+| **Profiling** | Where a request's CPU time goes, and on request its memory and garbage collections, on Node. |
 | **Tests** | Vitest 4.1 and later: a test fails when it makes an N+1 or duplicate queries. |
 | **Browser** | The badge and its panel on server-rendered pages, in Next.js through `<Tracepanel />` and in an SPA through the Vite plugin. The pages' views and clicks with their `fetch()` calls, linked to the API's traces. |
 
@@ -323,6 +323,19 @@ the line that ran it and the fix:
   every request at once, so a profile keeps the samples taken while its
   request was the only one running, and counts the rest
   (`tracepanel.dropped_samples`). Time spent waiting on I/O is not in it.
+  Every profile counts the garbage collector's runs and their pauses.
+- A profile's memory too, when asked: `X-Tracepanel-Profile: memory`, the
+  `tracepanel_profile=memory` cookie (the panel's Profile toggle offers
+  it), or `TRACEPANEL_PROFILE_MEMORY=1`. V8's sampling heap profiler takes
+  about one allocation in every 32 KB with its stack: the profile shows the
+  heap's peak above where the request started, what V8 allocated in all
+  (on Node 26), and the 50 sites whose allocations still lived at its end.
+  The heap is the whole process's, so a request that ran beside others says
+  so. It costs: code runs about 15% slower while it is sampled, and reading
+  the sampler's profile makes V8 collect the whole heap once at the end of
+  each such request, after its response, which stops the process for a few
+  milliseconds on a small heap and over 100 ms on a heap of a few hundred
+  MB. Leave it off when you measure time. Not on Bun.
 - The caller's trace, when a request carries a W3C `traceparent`: the agent
   links the two.
 
@@ -436,6 +449,7 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_CAPTURE_REQUEST` | on | `0` stops keeping each request's headers, query, cookies and body |
 | `TRACEPANEL_CAPTURE_LOCALS` | on | `0` stops reading an error's local variables |
 | `TRACEPANEL_PROFILE` | off | `1` profiles every trace, not only a request that asks |
+| `TRACEPANEL_PROFILE_MEMORY` | off | `1` profiles every profiled trace's memory too |
 | `TRACEPANEL_PROFILE_ENABLED` | on | `0` profiles nothing, and the console offers no Profile toggle |
 | `TRACEPANEL_PROFILE_INTERVAL_MS` | `1` | how often a profiled trace is sampled |
 
