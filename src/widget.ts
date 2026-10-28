@@ -1,6 +1,8 @@
 // What a response gives the widget: the trace's id and timing in headers, and widget.min.js in an HTML page.
 
+import { pipeline, type Readable, Transform } from "node:stream";
 import { runtimeLabel } from "./processor.js";
+import { type RequestHeaders, redirectCookie } from "./request.js";
 import type { Runtime } from "./runtime.js";
 
 function escapeHtml(text: string): string {
@@ -86,6 +88,33 @@ export function exposedHeaders(allowOrigin: unknown, existing: unknown): string 
   return [...new Set([...names, ...EXPOSED])].join(", ");
 }
 
+export interface ResponseMarks {
+  /** The badge's headers, Access-Control-Expose-Headers with them on a CORS response. */
+  headers: Record<string, string>;
+  /** The Set-Cookie that names a redirect answering a page's navigation, for the next page's panel. */
+  cookie: string | undefined;
+  script: string | undefined;
+}
+
+/**
+ * What a framework's response gets (Fastify's, Koa's): the badge's headers, the redirect's cookie, and the script for
+ * a page. `header` reads the response's headers so far.
+ */
+export function responseMarks(
+  tracepanel: Runtime,
+  request: BadgeRequest,
+  requested: RequestHeaders,
+  header: (name: string) => unknown,
+): ResponseMarks | undefined {
+  const marks = tracepanel.badge(request);
+  if (!marks) return undefined;
+  const headers = { ...marks.headers };
+  const expose = exposedHeaders(header("access-control-allow-origin"), header("access-control-expose-headers"));
+  if (expose) headers["Access-Control-Expose-Headers"] = expose;
+  const cookie = redirectCookie(marks.headers["Tracepanel-Id"] ?? "", request.status, requested);
+  return { headers, cookie, script: marks.script };
+}
+
 /** The tag first in <head>, so the widget wraps fetch before the page's scripts keep a reference to it. */
 export function inject(page: string, tag: string): string {
   const head = /<head(?:\s[^>]*)?>/i.exec(page);
@@ -157,4 +186,20 @@ export class Stream {
     this.done = true;
     return rest;
   }
+}
+
+/** A Node stream with the script put into the page as it passes (a Fastify or Koa page streamed). */
+export function streamWith(source: Readable, tag: string): Transform {
+  const script = new Stream(tag);
+  const piped = new Transform({
+    transform(chunk: Buffer | string, _encoding, done) {
+      done(null, script.feed(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
+    },
+    flush(done) {
+      const rest = script.end();
+      done(null, rest.length > 0 ? rest : undefined);
+    },
+  });
+  // An error of the page's stream ends this one with it.
+  return pipeline(source, piped, () => {});
 }
