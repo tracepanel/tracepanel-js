@@ -141,8 +141,9 @@ export function sends(name: string): void {
 /**
  * The first line to the agent: it finds the issues with this project's limits. What the app offers the console, said
  * here only: it can EXPLAIN a query on its database, its traces hold what each request carried while that is kept,
- * and a request that asks is profiled while profiling is on (the console's Profile toggle shows then); and what it
- * sends besides traces (`live_tasks`).
+ * and a request that asks is profiled while profiling is on (the console's Profile toggle shows then), every trace
+ * when TRACEPANEL_PROFILE=1 says so (`profile_all`: the toggle shows on); and what it sends besides traces
+ * (`live_tasks`). No `profile_memory`: the SDK has no memory profiler.
  */
 export function hello(config: Config): Record<string, unknown> {
   return {
@@ -153,7 +154,7 @@ export function hello(config: Config): Record<string, unknown> {
     capabilities: [
       "explain",
       ...(config.captureRequest ? ["request"] : []),
-      ...(config.profileEnabled && canProfile() ? ["profile"] : []),
+      ...(config.profileEnabled && canProfile() ? ["profile", ...(config.profile ? ["profile_all"] : [])] : []),
       ...[...SENDS].sort(),
     ],
   };
