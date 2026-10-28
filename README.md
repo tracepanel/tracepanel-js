@@ -22,7 +22,7 @@ It runs while you develop, and everything stays on your machine.
 | --- | --- |
 | **Runtimes** | Node.js 20.19 and later, tested in CI on 20.19, 22, 24 and 26. Bun. |
 | **Frameworks** | Express 4.18 and later, NestJS on Express, Next.js in its Node.js runtime, Nuxt, and `Bun.serve`. On Bun also any fetch handler, such as Hono's or Elysia's. Any other server on Node's `node:http` at the request level. |
-| **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. Transactions and their savepoints. EXPLAIN on PostgreSQL and MySQL. |
+| **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. SQLite through `better-sqlite3`, `node:sqlite` and `libsql`. Transactions and their savepoints. EXPLAIN on PostgreSQL, MySQL and SQLite. |
 | **Redis and MongoDB** | `ioredis` and `redis`, and the MongoDB driver, with their own N+1 and duplicates. |
 | **HTTP clients** | `fetch()`, and `node:http` clients such as axios, on Node and on Bun. |
 | **AWS** | The AWS SDK's v3 clients (`@aws-sdk/client-*`): S3 as storage calls, DynamoDB commands with their N+1 and duplicates, SQS and SNS messages, and every other service's calls, with their errors and retries. |
@@ -295,13 +295,16 @@ the line that ran it and the fix:
 - A form's POST that redirects to another page: the panel on that page
   lists the POST before it.
 - SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
-  Prisma's driver adapters), with the line of your code that ran each
+  Prisma's driver adapters), and from SQLite through `better-sqlite3`,
+  Node's `node:sqlite` and `libsql`, with the line of your code that ran each
   statement. A statement no code of yours made, such as a session store's,
   names the library code that asked for it, past the driver and the ORM;
   so do Redis and MongoDB commands. Prisma's operations show as steps.
-- Transactions: BEGIN … COMMIT (or ROLLBACK) on a `pg` client or a `mysql2`
-  connection, with its statements and the calls made inside it, and its
-  savepoints.
+- Transactions: BEGIN … COMMIT (or ROLLBACK) on a `pg` client, a `mysql2`
+  connection or a SQLite database, and better-sqlite3's `db.transaction()`,
+  with its statements and the calls made inside it, and its savepoints.
+- The console's EXPLAIN of a SQLite query (EXPLAIN QUERY PLAN) runs on the
+  app's own connection, so a database in memory has a plan too.
 - Redis commands (`ioredis`, `redis`) and MongoDB commands, with their own
   N+1 and duplicates.
 - Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios, on

@@ -39,6 +39,13 @@
   SDK records them: the model asked for and the one that answered, the
   tokens with what the cache served, the finish reasons, the tools called,
   a stream's time to its first chunk, and the error of a failed call.
+- SQLite: `better-sqlite3`, Node's `node:sqlite` and `libsql`. Each
+  statement is a step with its SQL, its values (a duplicate told from an
+  N+1 by their hash), the database file's name, the rows a read returned
+  and the line of your code that ran it. BEGIN … COMMIT and
+  better-sqlite3's `db.transaction()` are transactions, nested ones
+  savepoints. The console's EXPLAIN runs EXPLAIN QUERY PLAN on the app's own
+  connection.
 
 - A query made through Prisma, Drizzle, TypeORM, Sequelize, Knex or
   Mongoose names that ORM in `db.client` instead of the driver, so the

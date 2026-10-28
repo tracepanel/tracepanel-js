@@ -158,6 +158,16 @@ function skipped(span: ReadableSpan | SdkSpan): boolean {
   );
 }
 
+/** A value an instrumentation kept as JSON (an attribute holds no objects); undefined when there is none. */
+function parsed(value: unknown): unknown {
+  if (typeof value !== "string") return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function statementOf(attrs: Attrs): string {
   const text = first(attrs, "db.query.text", "db.statement");
   return typeof text === "string" ? text : "";
@@ -565,16 +575,21 @@ export class TracepanelProcessor implements SpanProcessor {
   private sqlAttrs(attrs: Attrs, sql: string, codeOrigin: string | null, orm?: string): Attrs {
     const system = String(first(attrs, "db.system.name", "db.system") ?? "");
     // pg reports the parameters with enhancedDatabaseReporting: the same statement with the same values is a
-    // duplicate, the same statement with other values an N+1 candidate.
-    const values = first(attrs, "db.postgresql.values", "db.query.parameter");
-    // What EXPLAIN binds back: pg's values; mysql2 writes them into the statement itself.
+    // duplicate, the same statement with other values an N+1 candidate. SQLite's (sqlite.ts) come as JSON.
+    const values = first(attrs, "db.postgresql.values", "db.query.parameter") ?? parsed(attrs["tracepanel.db.params"]);
+    // What EXPLAIN binds back: pg's values, SQLite's; mysql2 writes them into the statement itself.
     const params = Array.isArray(values) ? values : system === "mysql" ? [] : undefined;
+    const driver = attrs["tracepanel.db.client"];
+    const namespace = attrs["db.namespace"];
+    const rows = attrs["db.response.returned_rows"];
     return {
       ...(params ? { "db.params": params } : {}),
-      "db.client": orm ?? (system === "postgresql" ? "pg" : system),
+      "db.client": orm ?? (typeof driver === "string" ? driver : system === "postgresql" ? "pg" : system),
       "db.system": system,
       "db.vendor": system,
       "db.alias": "default",
+      ...(system === "sqlite" && typeof namespace === "string" ? { "db.namespace": namespace } : {}),
+      ...(typeof rows === "number" ? { "db.response.returned_rows": rows } : {}),
       "db.statement": statement(sql),
       "db.fingerprint": fingerprint(sql),
       "db.params_hash":

@@ -194,6 +194,8 @@ describe("a trace's memory", () => {
     const timeOnly = app();
     const asked = timeOnly.start("/time", "1");
     loadCatalog(1000);
+    // Long enough for the profiler's samples, however busy the machine: a profile with none isn't sent.
+    busy(20);
     const time = await timeOnly.end(asked, "/time");
 
     expect(time.profile?.memory).toBeUndefined();
