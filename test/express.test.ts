@@ -105,6 +105,17 @@ test("a page ended at once gets the script first in its head, and its new size",
   ]);
 });
 
+test("with the widget off (TRACEPANEL_WIDGET=0, the tests' pages), a page stays as the app made it", async () => {
+  tracepanel.config.widget = false;
+  try {
+    const response = await fetch(`${base}/page`);
+
+    expect([response.headers.get("tracepanel-id"), await response.text()]).toEqual(["01TRACE", PAGE]);
+  } finally {
+    tracepanel.config.widget = true;
+  }
+});
+
 test("a streamed page goes out as it comes, the badge's headers first and the script as its head passes", async () => {
   const response = await fetch(`${base}/streamed`);
   const reader = (response.body as ReadableStream<Uint8Array>).getReader();

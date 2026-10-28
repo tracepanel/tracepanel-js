@@ -187,6 +187,11 @@ export class Sender {
     else this.flushSoon(BATCH_WAIT_MS);
   }
 
+  /** Sends what is queued now, not with the next batch: a test's traces, whose issues the test waits for. */
+  flushNow(): void {
+    this.flushSoon(0);
+  }
+
   /** A task event, sent with the next batch: not counted with the traces, and dropped while no agent answers. */
   submitEvent(event: TaskEvent): void {
     if (this.events.length >= QUEUE_SIZE) return;

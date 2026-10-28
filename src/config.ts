@@ -29,6 +29,8 @@ export interface Config {
    * way.
    */
   profile: boolean;
+  /** Put widget.min.js into the app's HTML pages: TRACEPANEL_WIDGET=0 leaves them as they are (the tests' pages). */
+  widget: boolean;
   /** Whether profiling is possible at all: TRACEPANEL_PROFILE_ENABLED=0, and nothing profiles. */
   profileEnabled: boolean;
   /** How often a profiled trace is sampled: TRACEPANEL_PROFILE_INTERVAL_MS, each millisecond by default. */
@@ -109,6 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     thresholds: thresholds(env),
     captureRequest: on(env.TRACEPANEL_CAPTURE_REQUEST),
     captureLocals: on(env.TRACEPANEL_CAPTURE_LOCALS),
+    widget: on(env.TRACEPANEL_WIDGET),
     profile: onlyIf(env.TRACEPANEL_PROFILE),
     profileEnabled: on(env.TRACEPANEL_PROFILE_ENABLED),
     profileIntervalMs: Math.max(Math.floor(Number(env.TRACEPANEL_PROFILE_INTERVAL_MS)) || 1, 1),
