@@ -19,6 +19,7 @@ import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-middle/register-hooks.mjs";
 import { awsInstrumentation } from "./aws.js";
 import { BullMQInstrumentation } from "./bullmq.js";
+import { mongoStatement } from "./calls.js";
 import { captureConsole } from "./console.js";
 import { DatabasesInstrumentation } from "./explain.js";
 import { traceFetch } from "./fetch.js";
@@ -27,6 +28,7 @@ import { PinoLogs, WinstonLogs } from "./loggers.js";
 import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
 import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
+import { traceBunQueries } from "./queries.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { SqliteInstrumentation } from "./sqlite.js";
 import { TransactionsInstrumentation } from "./transactions.js";
@@ -100,7 +102,7 @@ export function start(options: Options = {}): Runtime | undefined {
     new IORedisInstrumentation(),
     new RedisInstrumentation(),
     // The command with its values: Tracepanel keeps their shape and a hash, which tells duplicates from an N+1.
-    new MongoDBInstrumentation({ enhancedDatabaseReporting: true }),
+    new MongoDBInstrumentation({ enhancedDatabaseReporting: true, dbStatementSerializer: mongoStatement }),
     new PrismaInstrumentation(),
     // BEGIN … COMMIT on a connection as a transaction span: after pg's and mysql2's, so its statements are inside.
     new TransactionsInstrumentation(),
@@ -138,6 +140,8 @@ export function start(options: Options = {}): Runtime | undefined {
   else traceFetch(tracepanel.config.root);
   // Calls to a model's API through fetch() (the AI SDK's providers): around the call's own span.
   traceLlmFetch();
+  // Bun's stacks have no async frames: an ORM's query takes the app's line as the app calls the ORM.
+  if (bun) traceBunQueries(tracepanel.config.root);
   captureConsole(tracepanel.processor);
   return tracepanel;
 }

@@ -24,6 +24,7 @@ import {
   type Trace,
 } from "./model.js";
 import { ASKED, ATTRIBUTE, asking, available, Profiler, type Recording, wanted } from "./profile.js";
+import { QUERY_ORIGIN, type QueryOrigin } from "./queries.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, madeAt } from "./stack.js";
 import { CONTROL } from "./transactions.js";
@@ -76,6 +77,10 @@ interface Building {
   transactions: Set<string>;
   /** OTel span id → the app's line behind a span that is left out, for the span it stands over (Next's fetch). */
   passedOrigins: Map<string, string | null>;
+  /** OTel span id of a span left out → its parent's, and whether it is an ORM's transaction (Prisma's $transaction). */
+  skippedParents: Map<string, { parent: string; ormTransaction: boolean }>;
+  /** OTel span id → the Tracepanel id of its parent, where it isn't its OTel parent's (a transaction an ORM began). */
+  fixedParents: Map<string, string | null>;
   /**
    * The app's line behind the latest span that had one. A driver often starts its query span later, from a callback
    * (pg's pool runs the query once it has a connection), where the stack holds none of the app's code; the
@@ -124,6 +129,8 @@ const NEXT_HANDLERS = new Set([
 // Requests that aren't the app's work: Next.js's for its own assets and dev tooling, and the ones to Tracepanel's
 // console on the app's own origin (the widget, the page's recording sending its traces).
 const INTERNAL = /^\/(_next|__nextjs|__tracepanel__\/)/;
+// Prisma's span of an interactive transaction, $transaction(async (tx) => ...): the app's callback runs in its context.
+const ORM_TRANSACTIONS = new Set(["prisma:client:transaction"]);
 // Prisma's own spans besides the operation: its SQL goes through the driver adapter's driver (pg, mysql2), recorded
 // there; the rest is its query engine's bookkeeping.
 const SKIPPED_NAMES = /^(pg\.connect|pg-pool\.connect|mysql2?\.connect|prisma:(?!client:operation$))/;
@@ -229,7 +236,13 @@ export class TracepanelProcessor implements SpanProcessor {
     }
     if (!building) return;
     this.owner.set(context.spanId, building);
-    const { origin: found, caller, orm: ormHere } = madeAt(this.config.root);
+    const attrs = attrsOf(span);
+    const here = madeAt(this.config.root);
+    // A query whose stack has none of the app's code (Bun's, no async frames) was made where the app last called its
+    // ORM, in this context (queries.ts).
+    const query = here.origin || !first(attrs, "db.system.name", "db.system") ? undefined : queryOrigin(parentContext);
+    const found = here.origin ?? query?.origin ?? null;
+    const ormHere = here.orm ?? query?.orm ?? null;
     // A driver's call made in a callback (pg-pool's query, once it has a connection) has neither the app's frames nor
     // its ORM's on the stack: it went through the ORM of the app's last call, as it was made where that one was.
     const orm = found ? ormHere : (ormHere ?? building.lastOrm);
@@ -237,12 +250,15 @@ export class TracepanelProcessor implements SpanProcessor {
       building.lastOrigin = found;
       building.lastOrm = ormHere;
     }
-    if (caller) building.callers.set(context.spanId, caller);
+    if (here.caller && !found) building.callers.set(context.spanId, here.caller);
     if (orm) building.orms.set(context.spanId, orm);
-    const attrs = attrsOf(span);
     if (!local && parent && skipped(span)) {
       building.ids.set(context.spanId, building.ids.get(parent.spanId) ?? null);
       building.passedOrigins.set(context.spanId, found ?? building.passedOrigins.get(parent.spanId) ?? null);
+      building.skippedParents.set(context.spanId, {
+        parent: parent.spanId,
+        ormTransaction: ORM_TRANSACTIONS.has(span.name),
+      });
       return;
     }
     if (attrs["tracepanel.span_kind"] === "transaction") building.transactions.add(context.spanId);
@@ -256,12 +272,33 @@ export class TracepanelProcessor implements SpanProcessor {
     building.parents.set(context.spanId, parent && !local ? (building.ids.get(parent.spanId) ?? null) : null);
     if (!parent && attrs["next.span_type"] === "BaseServer.handleRequest") building.framework = "Next.js";
     building.ids.set(context.spanId, newId());
+    if (parent && building.transactions.has(context.spanId)) this.adopt(building, parent.spanId, context.spanId);
     // A span started outside the app's code (undici's, under Next's fetch span) is the call the app made there.
     // So is one a call made from its context, which took the app's line as the app called it (fetch()).
     const passed =
       (parent ? building.passedOrigins.get(parent.spanId) : undefined) ??
       (parentContext.getValue(CALL_ORIGIN) as string | undefined);
     building.origins.set(context.spanId, found ?? passed ?? building.lastOrigin);
+  }
+
+  /**
+   * A transaction an ORM began from its own span (Prisma's interactive $transaction: BEGIN is sent from its engine,
+   * under its prisma:client:transaction span, while the app's callback runs in that span's context): what the callback
+   * does (its queries, HTTP calls, jobs) goes inside the transaction span, as it does when the app sends BEGIN itself.
+   */
+  private adopt(building: Building, parentSpanId: string, spanId: string): void {
+    let at: string | undefined = parentSpanId;
+    while (at !== undefined) {
+      const skippedSpan = building.skippedParents.get(at);
+      if (!skippedSpan) return;
+      if (skippedSpan.ormTransaction) {
+        building.fixedParents.set(spanId, building.ids.get(parentSpanId) ?? null);
+        building.ids.set(at, building.ids.get(spanId) ?? null);
+        skippedSpan.ormTransaction = false;
+        return;
+      }
+      at = skippedSpan.parent;
+    }
   }
 
   onEnd(span: ReadableSpan): void {
@@ -480,6 +517,8 @@ export class TracepanelProcessor implements SpanProcessor {
       expressHandlers: new Set(),
       transactions: new Set(),
       passedOrigins: new Map(),
+      skippedParents: new Map(),
+      fixedParents: new Map(),
       parents: new Map(),
       lastOrigin: null,
       lastOrm: null,
@@ -491,7 +530,11 @@ export class TracepanelProcessor implements SpanProcessor {
     const context = span.spanContext();
     const id = building.ids.get(context.spanId);
     if (!id) return;
-    const parentId = root ? null : (building.ids.get(span.parentSpanContext?.spanId ?? "") ?? null);
+    const parentId = root
+      ? null
+      : building.fixedParents.has(context.spanId)
+        ? (building.fixedParents.get(context.spanId) ?? null)
+        : (building.ids.get(span.parentSpanContext?.spanId ?? "") ?? null);
     if (!root && parentId === null) return;
     const attrs = attrsOf(span);
     const converted: Span = {
@@ -541,7 +584,8 @@ export class TracepanelProcessor implements SpanProcessor {
     } else if (attrs["tracepanel.span_kind"] === "transaction") {
       converted.kind = "transaction";
       const { "tracepanel.span_kind": _, ...own } = attrs;
-      converted.attrs = { ...own, "code.origin": codeOrigin, ...asked };
+      // Begun through an ORM (Prisma's $transaction, Drizzle's db.transaction()): db.client names it, as a query's does.
+      converted.attrs = { ...own, ...(orm ? { "db.client": orm } : {}), "code.origin": codeOrigin, ...asked };
     } else if (attrs["tracepanel.span_kind"] === LLM) {
       converted.kind = LLM;
       const { "tracepanel.span_kind": _, ...own } = attrs;
@@ -707,6 +751,10 @@ export interface Timing {
   dbMs: number;
   /** performance.now() as the request started. */
   startedMs: number;
+}
+
+function queryOrigin(parentContext: Context): QueryOrigin | undefined {
+  return parentContext.getValue(QUERY_ORIGIN) as QueryOrigin | undefined;
 }
 
 function requestKey(method: unknown, target: unknown): string {

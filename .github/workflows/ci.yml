@@ -83,3 +83,5 @@ jobs:
       - run: bun test/bun/body.ts
       # Hono on Bun: its middleware names the route, serve() marks the response once.
       - run: bun test/bun/hono.ts
+      # Drizzle's queries on Bun, whose stacks have no async frames: made where the app called Drizzle.
+      - run: bun test/bun/queries.ts

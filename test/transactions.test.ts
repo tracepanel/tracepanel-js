@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { type Config, loadConfig } from "../src/config.js";
 import type { Span, Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
+import { enter, QUERY_ORIGIN } from "../src/queries.js";
 import { wrapQuery, wrapRelease } from "../src/transactions.js";
 
 const config: Config = { ...loadConfig({}), enabled: true, root: "/app", service: "shop" };
@@ -143,5 +144,61 @@ describe("transactions", () => {
 
     const transaction = result.spans.find((span) => span.kind === "transaction");
     expect(transaction?.attrs["db.transaction.outcome"]).toBe("rollback");
+  });
+
+  it("keeps a statement's own line inside a transaction: the ORM call it came from, not BEGIN's", async () => {
+    const result = await request(async () => {
+      const client = new Client();
+      await client.query("BEGIN");
+      // What Drizzle's tx.update() leaves in the app's context on Bun (queries.ts).
+      enter(context.active().setValue(QUERY_ORIGIN, { origin: "routes/orders.ts:95 in checkout", orm: "drizzle" }));
+      await client.query("UPDATE product SET stock = 0");
+      await client.query("COMMIT");
+    });
+
+    expect(shape(result)).toEqual([
+      ["sql", "UPDATE product", "transaction default"],
+      ["transaction", "transaction default", "POST /checkout"],
+      ["http", "POST /checkout", null],
+    ]);
+
+    const update = result.spans.find((span) => span.kind === "sql");
+    expect([update?.attrs["db.client"], update?.attrs["code.origin"], update?.attrs["code.caller"]]).toEqual([
+      "drizzle",
+      "routes/orders.ts:95 in checkout",
+      undefined,
+    ]);
+  });
+
+  it("puts what a Prisma interactive transaction's callback does inside the transaction its engine began", async () => {
+    const result = await request(async () => {
+      // $transaction(): Prisma's span, the app's callback run in its context. Its engine sends BEGIN under a span of
+      // its own, in a context the callback never sees.
+      const prisma = tracer.startSpan("prisma:client:transaction");
+      await context.with(trace.setSpan(context.active(), prisma), async () => {
+        const client = new Client();
+        const start = tracer.startSpan("prisma:client:start_transaction");
+        await context.with(trace.setSpan(context.active(), start), () => client.query("BEGIN"));
+        start.end();
+        const create = tracer.startSpan("prisma:client:operation", {
+          attributes: { model: "Order", method: "create" },
+        });
+        await context.with(trace.setSpan(context.active(), create), () =>
+          client.query('INSERT INTO "public"."order" ("number") VALUES ($1)'),
+        );
+        create.end();
+        await fetchSomething();
+        await client.query("COMMIT");
+      });
+      prisma.end();
+    });
+
+    expect(shape(result)).toEqual([
+      ["sql", "INSERT order", "transaction default"],
+      ["function", "prisma Order.create", "transaction default"],
+      ["http.client", "GET 127.0.0.1/charge", "transaction default"],
+      ["transaction", "transaction default", "POST /checkout"],
+      ["http", "POST /checkout", null],
+    ]);
   });
 });

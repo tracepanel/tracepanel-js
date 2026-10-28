@@ -10,12 +10,14 @@ import type { Frame } from "./model.js";
 const CONTEXT_LINES = 5;
 // "    at fn (file:line:col)", "    at file:line:col", "    at async fn (file:line:col)".
 const FRAME = /^\s*at (?:async )?(?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/;
-// This package's own files are never the app's.
+// This package's own files are never the app's: its build, and its sources, where a runtime maps the build's frames
+// back through its source maps (Bun does).
 const OWN = fileURLToPath(new URL(".", import.meta.url));
+const OWN_SOURCES = resolve(OWN, "..", "src") + sep;
 
 /** Whether a file is this package's own. */
 export function ownFile(file: string): boolean {
-  return file.startsWith(OWN);
+  return file.startsWith(OWN) || file.startsWith(OWN_SOURCES);
 }
 
 export interface StackFrame {
@@ -135,7 +137,7 @@ export function inApp(file: string, root: string): boolean {
     file.startsWith(root + sep) &&
     !file.includes(`${sep}node_modules${sep}`) &&
     !BUNDLES.some((dir) => file.startsWith(root + dir)) &&
-    !file.startsWith(OWN) &&
+    !ownFile(file) &&
     !file.startsWith("node:")
   );
 }

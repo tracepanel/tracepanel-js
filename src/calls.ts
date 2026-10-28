@@ -85,6 +85,14 @@ export function redisCall(attrs: Attrs, spanName: string): { name: string; attrs
   };
 }
 
+/**
+ * A MongoDB command as its span's statement: JSON, with the Maps the driver makes of what the app wrote as objects
+ * (a find's sort, `{ asked: -1 }`, is a Map by then: JSON.stringify alone makes it `{}`).
+ */
+export function mongoStatement(command: unknown): string {
+  return JSON.stringify(command, (_key, value) => (value instanceof Map ? Object.fromEntries(value) : value));
+}
+
 export function isMongo(attrs: Attrs): boolean {
   return first(attrs, "db.system.name", "db.system") === "mongodb";
 }

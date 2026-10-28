@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { httpCall, mongoCall, redisCall, safeUrl } from "../src/calls.js";
+import { httpCall, mongoCall, mongoStatement, redisCall, safeUrl } from "../src/calls.js";
 import { exposedHeaders } from "../src/widget.js";
 
 describe("calls to other systems", () => {
@@ -65,6 +65,24 @@ describe("calls to other systems", () => {
 
     expect(find(1).attrs["db.params_hash"]).toBe(find(1).attrs["db.params_hash"]);
     expect(find(1).attrs["db.params_hash"]).not.toBe(find(2).attrs["db.params_hash"]);
+  });
+
+  it("writes the sort the driver made a Map of as the app wrote it", () => {
+    const command = {
+      find: "questions",
+      filter: { product: 7 },
+      sort: new Map([["asked", -1]]),
+      limit: 20,
+    };
+
+    expect(mongoStatement(command)).toBe('{"find":"questions","filter":{"product":7},"sort":{"asked":-1},"limit":20}');
+
+    expect(
+      mongoCall(
+        { "db.system": "mongodb", "db.operation": "find", "db.statement": mongoStatement(command) },
+        "mongodb.find",
+      ).attrs["db.statement"],
+    ).toBe('{"find":"questions","filter":{"product":"?"},"sort":{"asked":-1},"limit":20}');
   });
 });
 

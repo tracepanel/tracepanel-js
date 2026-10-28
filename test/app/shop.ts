@@ -97,3 +97,9 @@ export const catalog: { sku: string; name: string }[] = [];
 export function loadCatalog(count: number): void {
   for (let at = 0; at < count; at++) catalog.push({ sku: `sku-${at}`, name: `${"product ".repeat(8)}${at}` }); // kept
 }
+
+/** Two queries through an ORM, one after the other, each made on a line of its own. */
+export async function twoQueries(first: () => PromiseLike<unknown>, second: () => PromiseLike<unknown>): Promise<void> {
+  await first(); // first query
+  await second(); // second query
+}
