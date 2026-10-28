@@ -98,6 +98,7 @@ describe("code.caller", () => {
     expect(madeAt(APP)).toEqual({
       origin: null,
       caller: expect.stringMatching(/\/test\/caller\.test\.ts:\d+ in /),
+      orm: null,
     });
   });
 });
