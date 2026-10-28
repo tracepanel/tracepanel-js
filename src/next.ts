@@ -71,10 +71,9 @@ export function serveConsole(tracepanel: Runtime): void {
         answer(tracepanel, req, args[1] as ServerResponse);
         return true;
       }
-      // A request that asks to be profiled: Next.js starts its root span in this context.
-      if (event === "request" && req && requested(req.headers)) {
-        return context.with(context.active().setValue(PROFILE, true), () => emit.call(this, event, ...args));
-      }
+      // A request that asks to be profiled: Next.js starts its root span in this context, which says what it asked.
+      const asked = event === "request" && req ? requested(req.headers) : undefined;
+      if (asked) return context.with(context.active().setValue(PROFILE, asked), () => emit.call(this, event, ...args));
       return emit.call(this, event, ...args);
     } as typeof emit;
   }

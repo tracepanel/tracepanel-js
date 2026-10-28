@@ -14,6 +14,18 @@
   SDK's pytest plugin.
 - `TRACEPANEL_WIDGET=0` leaves the app's HTML pages without the widget's
   script (the Vitest plugin turns it off).
+- Memory profiling on Node, as the Python SDK has it: a request that asks
+  with `X-Tracepanel-Profile: memory` or the `tracepanel_profile=memory`
+  cookie, or every profiled one with `TRACEPANEL_PROFILE_MEMORY=1`, has the
+  heap's peak, what was allocated in all (Node 26) and the 50 sites whose
+  allocations still live at its end, from V8's sampling heap profiler, in
+  the console's Profile → Memory. The hello says `profile_memory` (and
+  `profile_memory_all`), so the Profile toggle offers it. Code runs about
+  15% slower while it is sampled, and each such request ends with a full
+  garbage collection (milliseconds on a small heap, over 100 ms on a few
+  hundred MB). Not on Bun.
+- Every profile counts the garbage collector's runs and their pauses
+  (`gc`), for the trace header and the time strip.
 
 - A query made through Prisma, Drizzle, TypeORM, Sequelize, Knex or
   Mongoose names that ORM in `db.client` instead of the driver, so the

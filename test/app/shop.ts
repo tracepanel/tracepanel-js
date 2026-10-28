@@ -89,3 +89,11 @@ export function goHome(): never {
   const target = "/";
   throw Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;replace;${target};307;` }); // redirected
 }
+
+/** What the catalog keeps in memory: a memory profile finds where it was allocated. */
+export const catalog: { sku: string; name: string }[] = [];
+
+/** Loads products into the catalog, which keeps them. */
+export function loadCatalog(count: number): void {
+  for (let at = 0; at < count; at++) catalog.push({ sku: `sku-${at}`, name: `${"product ".repeat(8)}${at}` }); // kept
+}

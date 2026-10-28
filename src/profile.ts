@@ -1,6 +1,7 @@
 // Where a trace's time goes in code: V8's sampling profiler, through Node's inspector (the trace's `profile`, a flame
 // graph in the console). Nothing runs until a trace is profiled: the setting profiles every one, a request asks with
-// the X-Tracepanel-Profile: 1 header or the panel's tracepanel_profile=1 cookie.
+// the X-Tracepanel-Profile: 1 header or the panel's tracepanel_profile=1 cookie. "memory" there rather than "1", or
+// TRACEPANEL_PROFILE_MEMORY=1, profiles its memory too (memory.ts). Every profile has the collector's runs (`gc`).
 //
 // The profiler samples the whole thread, and one event loop runs every request of the process at once: a sample
 // can't tell which request a frame belongs to. So a profiled trace keeps the samples taken while it was the only trace
@@ -17,15 +18,16 @@ import { relative } from "node:path";
 import { createContextKey } from "@opentelemetry/api";
 import type { Config } from "./config.js";
 import { call, connect, inspector, type Session } from "./inspector.js";
-import type { Profile, ProfileFrame } from "./model.js";
+import { type CallFrame, Collections, type Heap, HeapSampler, memoryAvailable, type Site } from "./memory.js";
+import type { Profile, ProfileFrame, ProfileMemory } from "./model.js";
 import { headerValue, parseCookies, type RequestHeaders } from "./request.js";
 import { inApp, libraryPath, ownFile, place } from "./stack.js";
 
 export const HEADER = "x-tracepanel-profile";
 export const COOKIE = "tracepanel_profile";
-/** On a request's root span: the request asked to be profiled. */
+/** On a request's root span: what the request asked for ("1", or "memory"). */
 export const ATTRIBUTE = "tracepanel.profile";
-/** In the context a framework starts the request's root span in (Next.js's): the request asked to be profiled. */
+/** In the context a framework starts the request's root span in (Next.js's): what the request asked for. */
 export const ASKED = createContextKey("tracepanel.profile");
 
 // How deep a stack is kept: a recursion beyond it is cut, outermost frames kept.
@@ -41,19 +43,39 @@ const IDLE = "(idle)";
 const ROOT = "(root)";
 const OTHER: ProfileFrame = { function: "(other)", module: null, file: "", line: 0, in_app: false };
 
-/** Whether a request asks to be profiled: the X-Tracepanel-Profile header, or the cookie the panel's toggle sets. */
-export function requested(headers: RequestHeaders): boolean {
-  if (headerValue(headers[HEADER])?.trim() === "1") return true;
-  const cookies = headerValue(headers.cookie);
-  return (
-    cookies?.includes(COOKIE) === true &&
-    parseCookies(cookies).some(([name, value]) => name === COOKIE && value === "1")
-  );
+/** A frame as the profile names it, once: by its function, file and line. */
+function frameKey(frame: ProfileFrame): string {
+  return `${frame.file}:${frame.line}:${frame.function}`;
 }
 
-/** Whether to profile a trace: the setting profiles every one, a request may ask; nothing when profiling is off. */
-export function wanted(config: Config, asked: boolean): boolean {
-  return config.profileEnabled && (config.profile || asked) && available();
+/** What a request asks for: the profile ("1"), or the profile with its memory ("memory"). */
+export type Asked = "1" | "memory";
+
+/** What a value asks for: "1" or "memory" as they are, true (a span marked by code) "1"; else nothing. */
+export function asking(value: unknown): Asked | undefined {
+  if (value === true || value === "1") return "1";
+  return value === "memory" ? "memory" : undefined;
+}
+
+/**
+ * What a request asks for: the X-Tracepanel-Profile header's, else the cookie's the panel's toggle sets; undefined
+ * when neither asks.
+ */
+export function requested(headers: RequestHeaders): Asked | undefined {
+  const asked = asking(headerValue(headers[HEADER])?.trim());
+  if (asked) return asked;
+  const cookies = headerValue(headers.cookie);
+  if (cookies?.includes(COOKIE) !== true) return undefined;
+  return asking(parseCookies(cookies).find(([name]) => name === COOKIE)?.[1]);
+}
+
+/**
+ * How to profile a trace: "memory" with its memory, "1" its time only; undefined for none. The setting profiles
+ * every one, a request may ask; nothing when profiling is off.
+ */
+export function wanted(config: Config, asked: Asked | undefined): Asked | undefined {
+  if (!(config.profileEnabled && (config.profile || asked) && available())) return undefined;
+  return (config.profileMemory || asked === "memory") && memoryAvailable() ? "memory" : "1";
 }
 
 /** Whether this runtime can profile: Node, with its inspector. */
@@ -61,11 +83,9 @@ export function available(): boolean {
   return inspector() !== null;
 }
 
-interface CallFrame {
-  functionName: string;
-  url: string;
-  lineNumber: number;
-  columnNumber: number;
+/** Whether this runtime can profile memory too: Node's inspector, and V8's GC profiler. */
+export function memoryProfiling(): boolean {
+  return available() && memoryAvailable();
 }
 
 interface CpuProfile {
@@ -81,12 +101,16 @@ export interface Recording {
   startedMs: number;
   /** The trace it profiles, as the profiler knows every trace of the process (see enter()). */
   trace: object;
+  /** Its memory, when that was asked for. */
+  heap: Heap | undefined;
 }
 
 /** The trace's profile and the samples left out because another trace ran at the same time. */
 export interface Result {
   profile: Profile | undefined;
   dropped: number;
+  /** The collector's runs during the trace, read once Node has told them (after the trace's late spans). */
+  gc?: () => Profile["gc"];
 }
 
 let next = 0;
@@ -104,6 +128,8 @@ export class Profiler {
   private ended: [number, number][] = [];
   /** The console profiles stopped, by title, as the inspector hands them over. */
   private readonly finished = new Map<string, CpuProfile>();
+  private heaps: HeapSampler | undefined;
+  private readonly collections = new Collections();
 
   constructor(
     private readonly root: string,
@@ -123,13 +149,19 @@ export class Profiler {
     if (this.recordings.size > 0) this.ended.push([started, performance.now()]);
   }
 
-  /** Begins profiling a trace that started (enter() first); undefined when the inspector can't. */
-  start(trace: object): Recording | undefined {
+  /**
+   * Begins profiling a trace that started (enter() first), its memory too when `memory`; undefined when the
+   * inspector can't.
+   */
+  start(trace: object, memory = false): Recording | undefined {
     const console = inspector()?.console;
     if (!console || !this.ensure()) return undefined;
     clearTimeout(this.idle);
+    this.collections.watch();
     next += 1;
-    const recording = { title: `tracepanel:${next}`, startedMs: performance.now(), trace };
+    if (memory && this.session && !this.heaps) this.heaps = new HeapSampler(this.session);
+    const heap = memory ? this.heaps?.begin() : undefined;
+    const recording: Recording = { title: `tracepanel:${next}`, startedMs: performance.now(), trace, heap };
     console.profile(recording.title);
     this.recordings.add(recording);
     return recording;
@@ -139,10 +171,24 @@ export class Profiler {
   stop(recording: Recording): Result {
     if (!this.recordings.has(recording)) return { profile: undefined, dropped: 0 };
     inspector()?.console.profileEnd(recording.title);
+    const endedMs = performance.now();
+    // Before it is let go: whether another trace ran while it did.
+    const shared = recording.heap ? this.overlapped(recording) : false;
+    const measured = recording.heap
+      ? this.heaps?.end(recording.heap, (frame) => this.frame(frame) === null)
+      : undefined;
     this.recordings.delete(recording);
     const profile = this.finished.get(recording.title);
     this.finished.delete(recording.title);
-    const result = profile ? this.document(recording, profile) : { profile: undefined, dropped: 0 };
+    const result: Result = profile ? this.document(recording, profile) : { profile: undefined, dropped: 0 };
+    if (measured) {
+      result.profile ??= { interval_us: Math.round(this.intervalMs * 1000), samples: 0, frames: [], stacks: [] };
+      result.profile.memory = this.memory(result.profile, measured.sites, shared, measured);
+    }
+    if (result.profile) {
+      const { startedMs } = recording;
+      result.gc = () => this.collections.during(startedMs, endedMs);
+    }
     if (this.recordings.size === 0) this.rest();
     else {
       const oldest = Math.min(...[...this.recordings].map((other) => other.startedMs));
@@ -183,6 +229,45 @@ export class Profiler {
     return true;
   }
 
+  /** Whether another trace than the recording's ran while it did (the heap is the process's). */
+  private overlapped(recording: Recording): boolean {
+    for (const trace of this.open.keys()) if (trace !== recording.trace) return true;
+    return this.ended.some(([, end]) => end >= recording.startedMs);
+  }
+
+  /** The profile's `memory`: its sites' frames added to the profile's own, each once. */
+  private memory(
+    profile: Profile,
+    sites: Site[],
+    shared: boolean,
+    measured: { peak: number; net: number; allocated?: number },
+  ): ProfileMemory {
+    const index = new Map(profile.frames.map((frame, at) => [frameKey(frame), at]));
+    const named = sites.flatMap((site) => {
+      const frames = site.frames.flatMap((callFrame) => {
+        const frame = this.frame(callFrame);
+        if (!frame) return [];
+        const key = frameKey(frame);
+        let at = index.get(key);
+        if (at === undefined) {
+          at = profile.frames.length;
+          index.set(key, at);
+          profile.frames.push(frame);
+        }
+        return [at];
+      });
+      return frames.length > 0 ? [{ frames, bytes: site.bytes, count: site.count }] : [];
+    });
+    return {
+      peak: measured.peak,
+      net: measured.net,
+      ...(measured.allocated !== undefined ? { allocated: measured.allocated } : {}),
+      sites: named,
+      sites_at: "end",
+      shared,
+    };
+  }
+
   /** No trace is profiled: the profile under them stops after a while, or now when it ran long. */
   private rest(): void {
     this.ended = [];
@@ -198,6 +283,7 @@ export class Profiler {
   private halt(): void {
     if (!this.session || !this.running || this.recordings.size > 0) return;
     this.running = false;
+    this.collections.rest();
     try {
       call(this.session, "Profiler.stop");
     } catch {

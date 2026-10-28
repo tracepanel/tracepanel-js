@@ -21,7 +21,7 @@ import {
   type Span,
   type Trace,
 } from "./model.js";
-import { ASKED, ATTRIBUTE, available, Profiler, type Recording, wanted } from "./profile.js";
+import { ASKED, ATTRIBUTE, asking, available, Profiler, type Recording, wanted } from "./profile.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, madeAt } from "./stack.js";
 import { CONTROL } from "./transactions.js";
@@ -206,8 +206,9 @@ export class TracepanelProcessor implements SpanProcessor {
       this.profiler?.enter(building);
       // The request asked for it: its root span says so (Node's HTTP server, Bun.serve), or the context the framework
       // started it in (Next.js).
-      const asked = rootAttrs[ATTRIBUTE] === true || parentContext.getValue(ASKED) === true;
-      if (this.profiler && wanted(this.config, asked)) building.recording = this.profiler.start(building);
+      const asked = asking(rootAttrs[ATTRIBUTE]) ?? asking(parentContext.getValue(ASKED));
+      const mode = this.profiler ? wanted(this.config, asked) : undefined;
+      if (mode) building.recording = this.profiler?.start(building, mode === "memory");
     }
     if (!building) return;
     this.owner.set(context.spanId, building);
@@ -264,7 +265,11 @@ export class TracepanelProcessor implements SpanProcessor {
     setTimeout(() => {
       this.close(building);
       this.finish(building, span);
-      if (sampled?.profile) building.trace.profile = sampled.profile;
+      if (sampled?.profile) {
+        building.trace.profile = sampled.profile;
+        const gc = sampled.gc?.();
+        if (gc) sampled.profile.gc = gc;
+      }
       if (sampled?.dropped) countDropped(building.trace, "tracepanel.dropped_samples", sampled.dropped);
       this.sink.submit(limited(building.trace));
     }, LATE_SPANS_MS).unref();

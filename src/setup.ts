@@ -115,11 +115,11 @@ export function start(options: Options = {}): Runtime | undefined {
       ignoreIncomingRequestHook: (request) =>
         options.httpServer === false ||
         (request.method === "OPTIONS" && request.headers["access-control-request-method"] !== undefined),
-      // A request that asks to be profiled says so on its span, as it starts.
-      startIncomingSpanHook: (request) =>
-        tracepanel.config.profileEnabled && "headers" in request && requested(request.headers)
-          ? { [PROFILE]: true }
-          : {},
+      // What a request asks to be profiled for says so on its span, as it starts.
+      startIncomingSpanHook: (request) => {
+        const asked = tracepanel.config.profileEnabled && "headers" in request ? requested(request.headers) : undefined;
+        return asked ? { [PROFILE]: asked } : {};
+      },
     }),
   ];
   registerInstrumentations({ instrumentations });

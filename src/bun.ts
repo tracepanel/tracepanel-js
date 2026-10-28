@@ -40,12 +40,13 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
   if (!tracepanel) return handler;
   const traced = (request: Request, server?: unknown) => {
     const url = new URL(request.url);
+    const asked = requested(Object.fromEntries(request.headers));
     const attributes = {
       "http.request.method": request.method,
       "url.path": url.pathname,
       "http.target": url.pathname + url.search,
       ...(route ? { "http.route": route } : {}),
-      ...(requested(Object.fromEntries(request.headers)) ? { [PROFILE]: true } : {}),
+      ...(asked ? { [PROFILE]: asked } : {}),
     };
     const startedMs = performance.now();
     // The caller's traceparent, as Node's http instrumentation reads it: the agent links the caller's trace to this.

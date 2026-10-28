@@ -11,7 +11,7 @@ import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
 import { ASKED, requested } from "../src/profile.js";
-import { crunchOrders, crunchPrices, crunchRates, crunchStock, crunchTaxes } from "./app/shop.js";
+import { catalog, crunchOrders, crunchPrices, crunchRates, crunchStock, crunchTaxes, loadCatalog } from "./app/shop.js";
 
 // The project is test/app: its code is the app's, this file stands for the framework.
 const root = new URL("./app/", import.meta.url).pathname.slice(0, -1);
@@ -36,14 +36,14 @@ function app(env: Record<string, string> = {}) {
   const processor = new TracepanelProcessor(config, { submit: (done) => sent.push(done) });
   const tracer = new BasicTracerProvider({ spanProcessors: [processor] }).getTracer("test");
 
-  /** A request's root span; `profile`: it asks to be profiled, as Node's HTTP server marks one. */
-  function start(path: string, profile = false): OtelSpan {
+  /** A request's root span; `profile`: what it asks to be profiled for, as Node's HTTP server marks one. */
+  function start(path: string, profile: boolean | "1" | "memory" = false): OtelSpan {
     return tracer.startSpan("GET", {
       kind: SpanKind.SERVER,
       attributes: {
         "http.request.method": "GET",
         "url.path": path,
-        ...(profile ? { "tracepanel.profile": true } : {}),
+        ...(profile ? { "tracepanel.profile": profile } : {}),
       },
     });
   }
@@ -83,6 +83,7 @@ describe("a trace's profile", () => {
       samples: expect.any(Number),
       frames: expect.any(Array),
       stacks: expect.any(Array),
+      gc: { collections: expect.any(Number), pause_us: expect.any(Number), pauses: expect.any(Array) },
     });
     expect(result.profile?.frames).toContainEqual({
       function: "crunchPrices",
@@ -143,20 +144,125 @@ describe("a trace's profile", () => {
   });
 });
 
+/** The memory's sites by the app's function that allocated, innermost first: its bytes and samples. */
+function sites(result: Trace): Record<string, { bytes: number; count: number }> {
+  const found: Record<string, { bytes: number; count: number }> = {};
+  for (const site of result.profile?.memory?.sites ?? []) {
+    const own = site.frames.map((index) => result.profile?.frames[index]).filter((frame) => frame?.in_app);
+    const name = own.at(-1)?.function ?? "(library)";
+    const known = found[name] ?? { bytes: 0, count: 0 };
+    found[name] = { bytes: known.bytes + site.bytes, count: known.count + site.count };
+  }
+  return found;
+}
+
+describe("a trace's memory", () => {
+  it("is profiled when the request asks for memory: the heap's peak and net, and where it was kept", async () => {
+    const { start, end } = app();
+    const span = start("/catalog", "memory");
+    loadCatalog(50_000);
+    const result = await end(span, "/catalog");
+
+    expect(result.profile?.memory).toEqual({
+      peak: expect.any(Number),
+      net: expect.any(Number),
+      ...(process.versions.node.split(".")[0] === "26" ? { allocated: expect.any(Number) } : {}),
+      sites: expect.any(Array),
+      sites_at: "end",
+      shared: false,
+    });
+    // 50,000 products of about 100 bytes each, and the catalog's array: megabytes, each a sample in 32 KB.
+    expect(result.profile?.memory?.peak).toBeGreaterThan(2_000_000);
+    expect(sites(result).loadCatalog).toEqual({ bytes: expect.any(Number), count: expect.any(Number) });
+    expect(sites(result).loadCatalog?.bytes).toBeGreaterThan(2_000_000);
+    expect(result.profile?.frames).toContainEqual({
+      function: "loadCatalog",
+      module: null,
+      file: "shop.ts",
+      line: expect.any(Number),
+      in_app: true,
+    });
+    // No site of this package's own.
+    const own = (result.profile?.memory?.sites ?? []).filter((site) =>
+      site.frames.some((index) => result.profile?.frames[index]?.file.startsWith(OWN)),
+    );
+    expect(own).toEqual([]);
+    catalog.length = 0;
+  });
+
+  it("is profiled for every profiled trace with TRACEPANEL_PROFILE_MEMORY=1; not for one that asks for the time", async () => {
+    const timeOnly = app();
+    const asked = timeOnly.start("/time", "1");
+    loadCatalog(1000);
+    const time = await timeOnly.end(asked, "/time");
+
+    expect(time.profile?.memory).toBeUndefined();
+    expect(time.profile?.gc).toEqual({
+      collections: expect.any(Number),
+      pause_us: expect.any(Number),
+      pauses: expect.any(Array),
+    });
+
+    const every = app({ TRACEPANEL_PROFILE_MEMORY: "1" });
+    const timed = every.start("/every", "1");
+    loadCatalog(20_000);
+    const result = await every.end(timed, "/every");
+
+    expect(sites(result).loadCatalog?.bytes).toBeGreaterThan(500_000);
+    catalog.length = 0;
+  });
+
+  it("says when another trace ran meanwhile: the heap is the process's", async () => {
+    const { start, end } = app();
+    const profiled = start("/first", "memory");
+    const other = start("/other");
+    loadCatalog(1000);
+    other.end();
+    const result = await end(profiled, "/first");
+
+    expect(result.profile?.memory?.shared).toBe(true);
+    catalog.length = 0;
+  });
+
+  it("has each collection's pause on the trace's clock", async () => {
+    const { start, end } = app();
+    const span = start("/garbage", "1");
+    // Young objects, thrown away at once: the young generation is collected, several times over.
+    let trash: { at: number }[] = [];
+    for (let at = 0; at < 2_000_000; at++) {
+      trash.push({ at });
+      if (trash.length === 1000) trash = [];
+    }
+    const result = await end(span, "/garbage");
+
+    const gc = result.profile?.gc;
+    expect(gc?.collections).toBeGreaterThan(0);
+    expect(gc?.pauses).toHaveLength(gc?.collections ?? 0);
+    expect(gc?.pause_us).toBe(gc?.pauses.reduce((sum, [, length]) => sum + length, 0));
+    for (const [from, , generation] of gc?.pauses ?? []) {
+      expect(from).toBeLessThanOrEqual(result.duration);
+      expect([0, 1, 2]).toContain(generation);
+    }
+  });
+});
+
 describe("asking for a profile", () => {
   it("is the X-Tracepanel-Profile header or the panel's cookie", () => {
     expect([
       requested({ "x-tracepanel-profile": "1" }),
       requested({ "x-tracepanel-profile": " 1 " }),
       requested({ cookie: "a=b; tracepanel_profile=1" }),
+      requested({ "x-tracepanel-profile": "memory" }),
+      requested({ cookie: "tracepanel_profile=memory" }),
       requested({ "x-tracepanel-profile": "0" }),
       requested({ cookie: "tracepanel_profile=0; my_tracepanel_profile=1" }),
+      requested({ cookie: "tracepanel_profile=all" }),
       requested({}),
-    ]).toEqual([true, true, true, false, false, false]);
+    ]).toEqual(["1", "1", "1", "memory", "memory", undefined, undefined, undefined, undefined]);
   });
 
   it("is offered in the hello while profiling is on, every trace's when TRACEPANEL_PROFILE=1", () => {
-    expect(hello(loadConfig({})).capabilities).toEqual(["explain", "request", "profile"]);
+    expect(hello(loadConfig({})).capabilities).toEqual(["explain", "request", "profile", "profile_memory"]);
 
     expect(hello(loadConfig({ TRACEPANEL_PROFILE_ENABLED: "0" })).capabilities).toEqual(["explain", "request"]);
 
@@ -165,7 +271,20 @@ describe("asking for a profile", () => {
       "request",
       "profile",
       "profile_all",
+      "profile_memory",
     ]);
+
+    expect(hello(loadConfig({ TRACEPANEL_PROFILE_MEMORY: "1" })).capabilities).toEqual([
+      "explain",
+      "request",
+      "profile",
+      "profile_memory",
+      "profile_memory_all",
+    ]);
+
+    expect(hello(loadConfig({ TRACEPANEL_PROFILE_MEMORY: "1", TRACEPANEL_PROFILE_ENABLED: "0" })).capabilities).toEqual(
+      ["explain", "request"],
+    );
 
     expect(hello(loadConfig({ TRACEPANEL_PROFILE: "1", TRACEPANEL_PROFILE_ENABLED: "0" })).capabilities).toEqual([
       "explain",
@@ -178,6 +297,8 @@ describe("asking for a profile", () => {
       loadConfig({}).profileIntervalMs,
       loadConfig({ TRACEPANEL_PROFILE_INTERVAL_MS: "5" }).profileIntervalMs,
       loadConfig({ TRACEPANEL_PROFILE_INTERVAL_MS: "0" }).profileIntervalMs,
-    ]).toEqual([false, true, 1, 5, 1]);
+      loadConfig({}).profileMemory,
+      loadConfig({ TRACEPANEL_PROFILE_MEMORY: "1" }).profileMemory,
+    ]).toEqual([false, true, 1, 5, 1, false, true]);
   });
 });

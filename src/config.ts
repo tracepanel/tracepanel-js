@@ -29,6 +29,11 @@ export interface Config {
    * way.
    */
   profile: boolean;
+  /**
+   * Tell every profiled trace's memory too (V8's sampling heap profiler), not only a request's that asks with
+   * "memory" in the header or cookie: TRACEPANEL_PROFILE_MEMORY=1.
+   */
+  profileMemory: boolean;
   /** Put widget.min.js into the app's HTML pages: TRACEPANEL_WIDGET=0 leaves them as they are (the tests' pages). */
   widget: boolean;
   /** Whether profiling is possible at all: TRACEPANEL_PROFILE_ENABLED=0, and nothing profiles. */
@@ -113,6 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captureLocals: on(env.TRACEPANEL_CAPTURE_LOCALS),
     widget: on(env.TRACEPANEL_WIDGET),
     profile: onlyIf(env.TRACEPANEL_PROFILE),
+    profileMemory: onlyIf(env.TRACEPANEL_PROFILE_MEMORY),
     profileEnabled: on(env.TRACEPANEL_PROFILE_ENABLED),
     profileIntervalMs: Math.max(Math.floor(Number(env.TRACEPANEL_PROFILE_INTERVAL_MS)) || 1, 1),
   };
