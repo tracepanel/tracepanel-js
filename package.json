@@ -1,7 +1,7 @@
 {
   "name": "@tracepanel/js",
   "version": "0.6.0",
-  "description": "Traces and logs for Node.js and Bun apps (Express, Fastify, Koa, Hono, NestJS, Next.js, Nuxt, Bun.serve): every request with its SQL, logs and errors, N+1 queries found",
+  "description": "Traces and logs for Node.js and Bun apps (Express, Fastify, Koa, Hono, NestJS, Next.js, Nuxt, Bun.serve, GraphQL Yoga, Apollo Server): every request with its SQL, logs and errors, N+1 queries found",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@12.11.0",
@@ -32,6 +32,10 @@
     "./hono": {
       "types": "./dist/hono.d.ts",
       "default": "./dist/hono.js"
+    },
+    "./graphql": {
+      "types": "./dist/graphql.d.ts",
+      "default": "./dist/graphql.js"
     },
     "./next": {
       "types": "./dist/next.d.ts",
@@ -136,6 +140,8 @@
     "@ai-sdk/anthropic": "^4.0.88",
     "@ai-sdk/openai": "^4.0.102",
     "@anthropic-ai/sdk": "^1.3.0",
+    "@apollo/server": "^5.5.1",
+    "@as-integrations/express5": "^1.1.2",
     "@aws-sdk/client-dynamodb": "^3.1156.0",
     "@aws-sdk/client-s3": "^3.1156.0",
     "@aws-sdk/client-secrets-manager": "^3.1156.0",
@@ -161,6 +167,8 @@
     "express": "^5.3.0",
     "express-session": "^1.19.0",
     "fastify": "^5.12.7",
+    "graphql": "^16.14.2",
+    "graphql-yoga": "^6.0.1",
     "h3": "^1.15.11",
     "happy-dom": "^21.0.1",
     "hono": "^4.13.13",
@@ -176,10 +184,13 @@
   },
   "keywords": [
     "anthropic",
+    "apollo",
     "aws",
     "bun",
     "express",
     "fastify",
+    "graphql",
+    "graphql-yoga",
     "hono",
     "koa",
     "llm",

@@ -22,6 +22,7 @@ It runs while you develop, and everything stays on your machine.
 | --- | --- |
 | **Runtimes** | Node.js 20.19 and later, tested in CI on 20.19, 22, 24 and 26. Bun. |
 | **Frameworks** | Express 4.18 and later, Fastify 5, Koa 3 with `@koa/router`, Hono 4.8 and later on Node and on Bun, NestJS on Express, Next.js in its Node.js runtime, Nuxt, and `Bun.serve`. On Bun also any fetch handler, such as Elysia's. Any other server on Node's `node:http` at the request level. |
+| **GraphQL** | GraphQL Yoga and Apollo Server, through their plugins: each request named after its operation, the app's resolvers as steps with their calls under them, resolver errors behind HTTP 200. |
 | **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. SQLite through `better-sqlite3`, `node:sqlite` and `libsql`. Transactions and their savepoints. EXPLAIN on PostgreSQL, MySQL and SQLite. |
 | **Redis and MongoDB** | `ioredis` and `redis`, and the MongoDB driver, with their own N+1 and duplicates. |
 | **HTTP clients** | `fetch()`, and `node:http` clients such as axios, on Node and on Bun. |
@@ -192,6 +193,38 @@ const app = await NestFactory.create(AppModule);
 app.use(tracepanel());
 await app.listen(3000);
 ```
+
+### GraphQL
+
+Add the plugin of your GraphQL server; load Tracepanel and its framework's
+middleware as above. GraphQL Yoga, on Express or any other server:
+
+```js
+import { createYoga } from "graphql-yoga";
+import { tracepanelYogaPlugin } from "@tracepanel/js/graphql";
+
+const yoga = createYoga({ schema, plugins: [tracepanelYogaPlugin()] });
+app.use(yoga.graphqlEndpoint, yoga);
+```
+
+Apollo Server:
+
+```js
+import { ApolloServer } from "@apollo/server";
+import { tracepanelApolloPlugin } from "@tracepanel/js/graphql";
+
+const server = new ApolloServer({ typeDefs, resolvers, plugins: [tracepanelApolloPlugin()] });
+```
+
+Each request is named after its operation, such as `GraphQL query Books`, so
+traffic groups by operation rather than `POST /graphql`, and the console's
+GraphQL page lists them. The operation is a step with its parse and validate
+phases, and each of your resolvers is a step, such as `Book.author`, with
+the queries and calls it makes under it: an N+1 shows which field runs it.
+Fields without a resolver of their own are left out. An exception a resolver
+throws is the request's error though the client gets it with a 200; a
+`GraphQLError` you answer with, and a client's syntax or validation error,
+are not. The variables are in the request's body, their secrets masked.
 
 ### Next.js
 

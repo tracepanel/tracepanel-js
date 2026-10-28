@@ -8,6 +8,8 @@ allowBuilds:
   better-sqlite3: true
   # BullMQ's msgpackr (the tests' BullMQ) works without its native extract: nothing to build.
   msgpackr-extract: false
+  # Apollo Server's (the tests' GraphQL server) protobufjs: its script only prints a notice.
+  "@apollo/protobufjs": false
 # Tracepanel's own packages (the agent's binaries) are released with this one.
 minimumReleaseAgeExclude:
   - "@tracepanel/*"

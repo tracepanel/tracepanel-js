@@ -10,6 +10,7 @@ import { httpCall, isMongo, isRedis, mongoCall, redisCall } from "./calls.js";
 import type { Config } from "./config.js";
 import { CALL_ORIGIN } from "./fetch.js";
 import { withVersion } from "./frameworks.js";
+import { GRAPHQL, RESOLVER } from "./graphql.js";
 import { ANTHROPIC_SCOPE, KIND as LLM } from "./llm.js";
 import { Locals } from "./locals.js";
 import {
@@ -383,6 +384,7 @@ export class TracepanelProcessor implements SpanProcessor {
     if (request) building.answered = true;
     return {
       id: building.trace.id,
+      name: nameOf(building.trace),
       queries: building.queries,
       dbMs: building.dbTime / 1000,
       startedMs: building.startedMs,
@@ -574,6 +576,26 @@ export class TracepanelProcessor implements SpanProcessor {
       converted.name = `${attrs["nestjs.controller"] ?? "Controller"}.${attrs["nestjs.callback"] ?? span.name}`;
       building.trace.attrs["code.view"] = converted.name;
       building.nestViews.add(id);
+    } else if (attrs["tracepanel.span_kind"] === GRAPHQL) {
+      // A GraphQL operation (graphql.ts), named after it, or its parse or validate phase.
+      converted.kind = "graphql";
+      converted.attrs =
+        attrs["graphql.library"] === undefined
+          ? {}
+          : {
+              "graphql.operation.type": attrs["graphql.operation.type"] ?? null,
+              "graphql.operation.name": attrs["graphql.operation.name"] ?? null,
+              "graphql.document": attrs["graphql.document"] ?? null,
+              "graphql.errors": attrs["graphql.errors"] ?? 0,
+              "graphql.library": attrs["graphql.library"],
+            };
+    } else if (attrs["tracepanel.span_kind"] === RESOLVER) {
+      // A resolver of the app's: what it called is under it.
+      converted.attrs = {
+        "graphql.field": attrs["graphql.field"],
+        "graphql.path": attrs["graphql.path"],
+        "code.function": attrs["code.function"],
+      };
     } else if (attrs["tracepanel.span_kind"] === "task.enqueue") {
       converted.kind = "task.enqueue";
       converted.name = String(attrs["task.name"] ?? span.name);
@@ -690,7 +712,7 @@ export class TracepanelProcessor implements SpanProcessor {
       // Nest throws NotFoundException and the like to answer 404, 422…: an answer, not an error.
       tr.errors = tr.errors.filter((error) => !building.nestViews.has(error.span_id ?? ""));
     }
-    tr.name = `${method} ${typeof route === "string" && route ? route : path}`;
+    tr.name = nameOf(tr) ?? `${method} ${typeof route === "string" && route ? route : path}`;
     tr.start = startUs(root);
     tr.duration = durationUs(root);
     if (status >= 500 || root.status.code === SpanStatusCode.ERROR || tr.errors.length > 0) tr.status = "error";
@@ -747,10 +769,18 @@ export class TracepanelProcessor implements SpanProcessor {
 
 export interface Timing {
   id: string;
+  /** The trace's name when it says more than the request line: a GraphQL operation's. */
+  name?: string | undefined;
   queries: number;
   dbMs: number;
   /** performance.now() as the request started. */
   startedMs: number;
+}
+
+/** A GraphQL request's name: one URL serves every operation, so the operation names it (`GraphQL query Books`). */
+function nameOf(trace: Trace): string | undefined {
+  const operation = trace.attrs["graphql.operation"];
+  return typeof operation === "string" ? `GraphQL ${operation}` : undefined;
 }
 
 function queryOrigin(parentContext: Context): QueryOrigin | undefined {

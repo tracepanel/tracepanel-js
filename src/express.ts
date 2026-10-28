@@ -3,9 +3,14 @@
 // pieces without a Content-Length is a stream, and goes out as it comes, an HTML page with the script put in as it
 // passes. What the request carried goes into its trace as the response goes out: its headers, query, cookies, the
 // body a body parser read (`req.body`, an upload's files), the session (`req.session`), and the response's headers. A redirect that answers a
-// page's navigation (a form's POST) sets the cookie that shows it in the next page's panel.
+// page's navigation (a form's POST) sets the cookie that shows it in the next page's panel. A handler that reads the
+// body from the stream itself (GraphQL Yoga) has it recorded as it read it. One that writes its headers itself with
+// `res.writeHead()` before its body (Yoga, a Node handler under `app.use()`) gets the badge's headers then, and its
+// HTML page no script.
 
+import type { OutgoingHttpHeaders } from "node:http";
 import type { NextFunction, Request, Response } from "express";
+import { tapIncoming, tapOf } from "./body.js";
 import type { Attrs } from "./model.js";
 import { hasBody, parsedBody, redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
 import { runtime } from "./runtime.js";
@@ -14,6 +19,7 @@ import { badge, exposedHeaders, inject, Stream, streamablePage } from "./widget.
 
 type Write = Response["write"];
 type End = Response["end"];
+type WriteHead = Response["writeHead"];
 type Callback = (error?: Error | null) => void;
 
 function toBuffer(chunk: unknown, encoding?: BufferEncoding): Buffer {
@@ -28,20 +34,29 @@ function toBuffer(chunk: unknown, encoding?: BufferEncoding): Buffer {
  */
 function carried(req: Request, res: Response): Attrs {
   const upload = req as Request & { file?: unknown; files?: unknown; session?: unknown };
-  const body = hasBody(req.headers)
-    ? parsedBody({
-        contentType: req.headers["content-type"] ?? "",
-        body: req.body,
-        file: upload.file,
-        files: upload.files,
-      })
-    : {};
+  const parsed =
+    req.body !== undefined || upload.file !== undefined || upload.files !== undefined
+      ? parsedBody({
+          contentType: req.headers["content-type"] ?? "",
+          body: req.body,
+          file: upload.file,
+          files: upload.files,
+        })
+      : undefined;
+  // No body parser read it: as far as the handler read it from the stream.
+  const body = hasBody(req.headers) ? (parsed ?? tapOf(req)?.attrs() ?? {}) : {};
   return {
     ...requestAttrs(req.headers, searchOf(req.originalUrl ?? req.url)),
     ...body,
     ...expressSession(upload.session),
     ...responseHeaders(Object.entries(res.getHeaders())),
   };
+}
+
+function pairsOf(flat: string[]): [string, string][] {
+  const pairs: [string, string][] = [];
+  for (let at = 0; at + 1 < flat.length; at += 2) pairs.push([String(flat[at]), String(flat[at + 1])]);
+  return pairs;
 }
 
 export function tracepanel() {
@@ -52,6 +67,8 @@ export function tracepanel() {
       return;
     }
     tp.processor.setFramework("Express");
+    // A handler may read the body from the stream itself: its pieces pass the tap on their way.
+    if (tp.config.captureRequest && hasBody(req.headers) && !req.readableEnded && !tapOf(req)) tapIncoming(req);
     const startedMs = performance.now();
     const chunks: Buffer[] = [];
     const write = res.write.bind(res) as Write;
@@ -64,7 +81,9 @@ export function tracepanel() {
       if (chunks.length > 0) write(Buffer.concat(chunks.splice(0)));
     };
 
+    const writeHead = res.writeHead.bind(res) as WriteHead;
     let recorded = false;
+    let marked = false;
     /** What the request carried, into its trace once, before the badge's headers join the response's. */
     const record = () => {
       if (recorded || !tp.config.captureRequest) return;
@@ -75,6 +94,7 @@ export function tracepanel() {
     /** The badge's headers on the response; its script tag when it is a page that gets one. */
     const mark = (page: boolean): string | undefined => {
       record();
+      marked = true;
       const framework = tp.processor.framework() ?? "Express";
       const marks = badge(tp, { method: req.method, status: res.statusCode, startedMs, page, framework });
       if (!marks) return undefined;
@@ -100,6 +120,24 @@ export function tracepanel() {
       const tag = mark(page);
       if (page && tag) script = new Stream(tag);
     };
+
+    // A handler that writes its headers itself, before its body: the badge's go with them. Headers passed here join
+    // the response's own first, so a CORS one among them exposes the badge's.
+    res.writeHead = ((status: number, ...rest: unknown[]) => {
+      if (marked || res.headersSent) return (writeHead as (...args: unknown[]) => Response)(status, ...rest);
+      const message = typeof rest[0] === "string" ? rest[0] : undefined;
+      const given = (message === undefined ? rest[0] : rest[1]) as OutgoingHttpHeaders | unknown[] | undefined;
+      res.statusCode = status;
+      if (Array.isArray(given)) {
+        // Raw headers: [name, value, ...] or [[name, value], ...].
+        const pairs = Array.isArray(given[0]) ? (given as [string, string][]) : pairsOf(given as string[]);
+        for (const [name, value] of pairs) res.appendHeader(name, value);
+      } else if (given) {
+        for (const [name, value] of Object.entries(given)) if (value !== undefined) res.setHeader(name, value);
+      }
+      mark(false);
+      return message === undefined ? writeHead(status) : writeHead(status, message);
+    }) as WriteHead;
 
     res.write = ((chunk: unknown, encoding?: unknown, callback?: unknown) => {
       // Its size declared, a body in pieces is held whole like a page ended at once; without one it is a stream.
