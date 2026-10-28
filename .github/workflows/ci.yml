@@ -1,6 +1,7 @@
 name: CI
 
-# Lint, types, the unit tests and the build, on every Node.js the package supports, and the build loaded by Bun.
+# Lint, types, the unit tests and the build, on every Node.js the package supports, and the build loaded by Bun. The
+# live tests run too, on a Postgres (EXPLAIN, transactions) and a Redis (BullMQ) of their own.
 on:
   push:
     branches: [main]
@@ -22,6 +23,21 @@ jobs:
       fail-fast: false
       matrix:
         node: ["20.19", "22", "24", "26"]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: shop
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: shop
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shop" --health-interval 2s --health-timeout 5s --health-retries 15
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 15
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -32,6 +48,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm test
+        env:
+          TRACEPANEL_TEST_POSTGRES: postgres://shop:secret@127.0.0.1:5432/shop
+          TRACEPANEL_TEST_REDIS: redis://127.0.0.1:6379
       - run: pnpm build
       # What `node --import @tracepanel/js/register` loads: it must start without the app.
       - run: node --input-type=module -e "await import('./dist/register.js'); console.log('register loads')"

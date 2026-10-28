@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- With `TRACEPANEL_PROFILE=1` the hello says every trace is profiled
+  (`profile_all`), so the console's Profile button shows on.
+
 ## 0.5.0 (2026-10-26)
 
 Needs `@tracepanel/agent` 0.5.0 (installed with it). Its console has pages

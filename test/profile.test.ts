@@ -155,10 +155,22 @@ describe("asking for a profile", () => {
     ]).toEqual([true, true, true, false, false, false]);
   });
 
-  it("is offered in the hello while profiling is on", () => {
+  it("is offered in the hello while profiling is on, every trace's when TRACEPANEL_PROFILE=1", () => {
     expect(hello(loadConfig({})).capabilities).toEqual(["explain", "request", "profile"]);
 
     expect(hello(loadConfig({ TRACEPANEL_PROFILE_ENABLED: "0" })).capabilities).toEqual(["explain", "request"]);
+
+    expect(hello(loadConfig({ TRACEPANEL_PROFILE: "1" })).capabilities).toEqual([
+      "explain",
+      "request",
+      "profile",
+      "profile_all",
+    ]);
+
+    expect(hello(loadConfig({ TRACEPANEL_PROFILE: "1", TRACEPANEL_PROFILE_ENABLED: "0" })).capabilities).toEqual([
+      "explain",
+      "request",
+    ]);
 
     expect([
       loadConfig({}).profile,
