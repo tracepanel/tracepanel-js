@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- GraphQL Yoga and Apollo Server: `tracepanelYogaPlugin()` and
+  `tracepanelApolloPlugin()` from `@tracepanel/js/graphql`. Each request is
+  named after its operation (`GraphQL query Books`, `GraphQL query { books,
+  authors }` when unnamed, `GraphQL syntax error` for a document that didn't
+  parse), with the `graphql.*` attributes the Python SDK's Strawberry and
+  Graphene send, so the console's GraphQL page lists the operations and the
+  widget shows the name. The operation is a step with its parse and validate
+  phases, and each of the app's resolvers a step (`Book.author`, its path
+  `books.3.author`) with what it calls under it. An exception a resolver
+  throws is the request's error, on its step, though the client gets a 200;
+  a `GraphQLError` the app answers with, and a client's syntax or
+  validation error, are not.
+
+### Fixed
+
+- Express: a handler that writes its headers itself with `res.writeHead()`
+  before its body, as GraphQL Yoga's `app.use(yoga)` does, now gets the
+  trace's headers (Tracepanel-Id, Server-Timing, and the CORS exposure of
+  them) with its own, so the badge and the panel find its trace. Its body
+  is recorded as the handler read it from the stream, when no body parser
+  read it.
+
 ## 0.6.0 (2026-10-28)
 
 Needs `@tracepanel/agent` 0.6.0 (installed with it). Its N+1 hint is the

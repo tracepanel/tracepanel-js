@@ -48,6 +48,8 @@ export function badge(tracepanel: Runtime, request: BadgeRequest): Badge | undef
     "Server-Timing": `db;dur=${timing.dbMs.toFixed(1)};desc="${timing.queries} ${noun}", app;dur=${Math.max(totalMs - timing.dbMs, 0).toFixed(1)}, total;dur=${totalMs.toFixed(1)}, tracepanel-issues;desc="pending"`,
   };
   if (consoleUrl) headers["Tracepanel-Url"] = `${consoleUrl}#/t/${timing.id}`;
+  // A name the request line doesn't say (a GraphQL operation's): the widget shows it.
+  if (timing.name) headers["Tracepanel-Name"] = headerValue(timing.name);
   // The console on the page's own origin, where the app serves it: the widget and the page's recording share it.
   const api = tracepanel.onOrigin?.prefix ?? consoleUrl;
   const scriptAttrs =
@@ -71,6 +73,14 @@ export function badge(tracepanel: Runtime, request: BadgeRequest): Badge | undef
         .join(" ")}></script>`
     : undefined;
   return { headers, script, scriptAttrs };
+}
+
+// What a header value keeps as it is, as the Python SDK's: the rest is percent-encoded (header values are Latin-1),
+// and the widget decodes it.
+const PLAIN = /[A-Za-z0-9_.\-~ /:{}<>()[\],]/;
+
+function headerValue(text: string): string {
+  return [...text].map((char) => (PLAIN.test(char) ? char : encodeURIComponent(char))).join("");
 }
 
 const EXPOSED = ["Tracepanel-Id", "Tracepanel-Name", "Tracepanel-Url", "Server-Timing"];

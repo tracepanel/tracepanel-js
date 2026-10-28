@@ -71,6 +71,19 @@ app.post("/api/books", express.json(), (req, res) => {
 app.post("/raw", (_req, res) => {
   res.json({ read: false });
 });
+// A handler that reads the body from the stream and writes its headers itself, as GraphQL Yoga's adapter does.
+app.post("/written", async (req, res) => {
+  for await (const _ of req);
+  res.writeHead(200, "OK", {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "http://127.0.0.1:5173",
+  });
+  res.end("{}");
+});
+app.get("/written-raw", (_req, res) => {
+  res.writeHead(201, ["Content-Type", "text/plain", "X-Kind", "raw"]);
+  res.end("ok");
+});
 const server: Server = await new Promise((resolve) => {
   const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
 });
@@ -235,6 +248,44 @@ test("a body no parser read is not recorded, and a call's redirect sets no cooki
   const call = await send("POST", "/login", { ...FORM, "Sec-Fetch-Mode": "cors" }, "email=a");
 
   expect(call).toEqual({ status: 303, cookies: ["sessionid=s3cr3t; Path=/"] });
+});
+
+test("headers a handler writes itself (writeHead) get the badge's with them, CORS exposing it", async () => {
+  const response = await fetch(`${base}/written`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "{ me }", variables: { password: "p" } }),
+  });
+
+  expect([response.status, await response.text()]).toEqual([200, "{}"]);
+
+  expect({
+    ...badgeHeaders(response),
+    "access-control-allow-origin": response.headers.get("access-control-allow-origin"),
+    "access-control-expose-headers": response.headers.get("access-control-expose-headers"),
+  }).toEqual({
+    "tracepanel-id": "01TRACE",
+    "tracepanel-url": "http://127.0.0.1:9/#/t/01TRACE",
+    "server-timing": expect.stringMatching(/^db;dur=1\.5;desc="2 queries", app;dur=.*, total;dur=/),
+    // Its headers went out before its body: the handler's to size.
+    "content-length": null,
+    "transfer-encoding": "chunked",
+    "access-control-allow-origin": "http://127.0.0.1:5173",
+    "access-control-expose-headers": "Tracepanel-Id, Tracepanel-Name, Tracepanel-Url, Server-Timing",
+  });
+
+  // The body as the handler read it from the stream, its secrets masked.
+  expect(recorded["http.request.body"]).toBe('{"query":"{ me }","variables":{"password":"********"}}');
+
+  const raw = await fetch(`${base}/written-raw`);
+
+  expect([
+    raw.status,
+    await raw.text(),
+    raw.headers.get("x-kind"),
+    raw.headers.get("content-type"),
+    raw.headers.get("tracepanel-id"),
+  ]).toEqual([201, "ok", "raw", "text/plain", "01TRACE"]);
 });
 
 test("nothing the request carried is recorded with TRACEPANEL_CAPTURE_REQUEST off; the redirect cookie still goes", async () => {
