@@ -12,9 +12,9 @@ line of code to fix. You read it in a panel on your pages and in a console.
 
 It runs while you develop, and everything stays on your machine.
 
-[![A 40-second demo: Swagger UI's Try it out on an endpoint, and the panel docked under it with the request's call tree, an N+1 with its query plan, a background task, its profile, and the same call after the fix](https://raw.githubusercontent.com/tracepanel/tracepanel-js/main/assets/demo-video.jpg)](https://tracepanel.dev/video/demo.mp4)
+[![A 40-second demo of a Next.js store: Swagger UI's Try it out on an endpoint, and the panel docked under it with the request's call tree, an N+1 with its query plan and line, a BullMQ job, the CPU profile, and the same call after the fix](https://raw.githubusercontent.com/tracepanel/tracepanel-js/main/assets/demo-video.jpg)](https://tracepanel.dev/video/demo-js.mp4)
 
-▶ [Watch the 40-second demo](https://tracepanel.dev/video/demo.mp4)
+▶ [Watch the 40-second demo](https://tracepanel.dev/video/demo-js.mp4)
 
 ## Works with
 
