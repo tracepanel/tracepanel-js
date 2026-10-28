@@ -4,19 +4,46 @@
 [![npm](https://img.shields.io/npm/v/@tracepanel/js)](https://www.npmjs.com/package/@tracepanel/js)
 [![Node.js](https://img.shields.io/node/v/@tracepanel/js)](https://www.npmjs.com/package/@tracepanel/js)
 
-**See what your app does on every request.** Tracepanel records each request
-of your Express, NestJS, Next.js, Nuxt or Bun app with its SQL queries, logs
-and errors. It finds N+1 queries, duplicate queries and slow SQL, and names
-the line of code to fix. You read it in a panel on your pages and in a
-console.
+**See what your Node.js or Bun app is really doing.** Tracepanel records each
+request and background job of your app with its SQL queries, Redis and
+MongoDB commands, outgoing HTTP calls, logs and errors. It points out N+1
+queries and calls, duplicates, slow SQL and slow HTTP calls, and names the
+line of code to fix. You read it in a panel on your pages and in a console.
 
 It runs while you develop, and everything stays on your machine.
 
-## Setup
+[![A 40-second demo: Swagger UI's Try it out on an endpoint, and the panel docked under it with the request's call tree, an N+1 with its query plan, a background task, its profile, and the same call after the fix](https://raw.githubusercontent.com/tracepanel/tracepanel-js/main/assets/demo-video.jpg)](https://tracepanel.dev/video/demo.mp4)
+
+▶ [Watch the 40-second demo](https://tracepanel.dev/video/demo.mp4)
+
+## Works with
+
+| | Supported |
+| --- | --- |
+| **Runtimes** | Node.js 20.19 and later, tested in CI on 20.19, 22, 24 and 26. Bun. |
+| **Frameworks** | Express 4.18 and later, NestJS on Express, Next.js in its Node.js runtime, Nuxt, and `Bun.serve`. On Bun also any fetch handler, such as Hono's or Elysia's. Any other server on Node's `node:http` at the request level. |
+| **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. Transactions and their savepoints. EXPLAIN on PostgreSQL and MySQL. |
+| **Redis and MongoDB** | `ioredis` and `redis`, and the MongoDB driver, with their own N+1 and duplicates. |
+| **HTTP clients** | `fetch()`, and `node:http` clients such as axios, on Node and on Bun. |
+| **Background jobs** | BullMQ: each job a worker runs is a task, each job the app adds a step, and the jobs in flight are listed live. |
+| **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. |
+| **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |
+| **Profiling** | Where a request's CPU time goes, on Node. |
+| **Browser** | The badge and its panel on server-rendered pages, in Next.js through `<Tracepanel />` and in an SPA through the Vite plugin. The pages' views and clicks with their `fetch()` calls, linked to the API's traces. |
+
+The settings and what each integration records are in the
+[JavaScript docs](https://tracepanel.dev/docs/javascript).
+
+## Install
 
 ```bash
 npm install @tracepanel/js
 ```
+
+It brings the agent for your platform, `@tracepanel/agent`, which keeps the
+traces and serves the console.
+
+## Setup
 
 Tracepanel is on unless `NODE_ENV` is `production`. `TRACEPANEL_ENABLED=0`
 turns it off and `TRACEPANEL_ENABLED=1` turns it on. It starts its agent on
@@ -223,6 +250,21 @@ console on the page's origin (`api`, `/__tracepanel__/` by default).
 `ignoreSources` takes the path prefixes of scripts whose console isn't the
 page's, such as a dev server's client.
 
+## What it looks like
+
+Each request shows its call tree, with the SQL queries, the calls and the
+issues in it. Here a Next.js store on Postgres lists its products from
+Swagger UI, and loads each product's category, brand and rating in a query of
+its own:
+
+![A Next.js app's Swagger UI with an endpoint run with Try it out and the start of its 200 response, and the panel docked under it with the same request's call tree and its three N+1 queries](https://raw.githubusercontent.com/tracepanel/tracepanel-js/main/assets/panel-call-tree.png)
+
+The panel also lists what happened on the page: its view, each click, and the
+requests it made with `fetch()`, here Swagger UI's Execute. Each issue names
+the line that ran it and the fix:
+
+![The same Swagger UI with the panel docked under it on that request's Issues tab: each N+1 with the line it comes from and the fix](https://raw.githubusercontent.com/tracepanel/tracepanel-js/main/assets/panel-issues.png)
+
 ## What it records
 
 - HTTP requests, with the route and the handler that served them, and what
@@ -352,9 +394,15 @@ installing, the integrations, the browser recording, settings and the command
 line. The panel, the console and the issues are the same in every framework,
 under [tracepanel.dev/docs](https://tracepanel.dev/docs).
 
+## Links
+
+- [tracepanel](https://github.com/tracepanel/tracepanel): what Tracepanel finds,
+  how it works, privacy, and the agent this package installs
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version
+
 ## License
 
 Licensed under the [MIT License](LICENSE). The agent npm installs with it,
-`@tracepanel/agent`, is under the
+`@tracepanel/agent`, is free to use under the
 [FSL-1.1-ALv2](https://github.com/tracepanel/tracepanel/blob/main/LICENSE):
 source available, and Apache-2.0 two years after each release.
