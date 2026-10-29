@@ -55,6 +55,16 @@ function busyUntilSampled(processor: TracepanelProcessor): void {
   }
 }
 
+/** The whole heap collected: V8 does it in a task of its own, done when the inspector answers. */
+async function collectGarbage(): Promise<void> {
+  const session = new inspector.Session();
+  session.connect();
+  await new Promise((done, failed) =>
+    session.post("HeapProfiler.collectGarbage", (error) => (error ? failed(error) : done(undefined))),
+  );
+  session.disconnect();
+}
+
 /** A processor of its own, with these settings, and the traces it sends. */
 function app(env: Record<string, string> = {}) {
   const config: Config = { ...loadConfig(env), enabled: true, root, service: "shop" };
@@ -185,6 +195,9 @@ function sites(result: Trace): Record<string, { bytes: number; count: number }> 
 describe("a trace's memory", () => {
   it("is profiled when the request asks for memory: the heap's peak and net, and where it was kept", async () => {
     const { start, end } = app();
+    // The garbage of the tests before, collected first: the peak is measured from the heap's level at the start, and a
+    // collection of that garbage while the trace runs would take the catalog's bytes off it.
+    await collectGarbage();
     const span = start("/catalog", "memory");
     loadCatalog(50_000);
     const result = await end(span, "/catalog");
