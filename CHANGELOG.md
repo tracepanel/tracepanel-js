@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 (2026-10-29)
+
+Needs `@tracepanel/agent` 0.7.0 (installed with it). It shows a request
+across the apps it went through: a browser's call, a BFF and the API
+behind it are one tree. The DB, HTTP calls, Logs, Issues and Profile tabs
+cover the whole chain, and an N+1 across apps is found on the trace that
+made the calls. EXPLAIN of a query runs in the app that recorded it, from
+any console.
 
 ### Added
 
