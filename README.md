@@ -31,7 +31,7 @@ It runs while you develop, and everything stays on your machine.
 | **Background jobs** | BullMQ: each job a worker runs is a task, each job the app adds a step, and the jobs in flight are listed live. |
 | **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. |
 | **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |
-| **Profiling** | Where a request's CPU time goes, and on request its memory and garbage collections, on Node. |
+| **Profiling** | Where a request's CPU time goes, and its memory and garbage collections when you ask for them, on Node. |
 | **Tests** | Vitest 4.1 and later: a test fails when it makes an N+1 or duplicate queries. |
 | **Browser** | The badge and its panel on server-rendered pages, in Next.js through `<Tracepanel />` and in an SPA through the Vite plugin. The pages' views and clicks with their `fetch()` calls, linked to the API's traces. |
 
