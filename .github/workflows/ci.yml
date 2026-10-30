@@ -15,8 +15,36 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # paths-filter lists a pull request's files through the API.
+      pull-requests: read
+    outputs:
+      code: ${{ github.event_name != 'pull_request' || steps.code.outputs.code == 'true' }}
+    steps:
+      # A pull request that changes only the pages (the README and its images, the changelog) or the license tests
+      # nothing. Node's jobs are required checks under their matrix names: they still run, each step skipped, so the
+      # checks pass. Bun's, skipped whole, counts as passed.
+      - if: github.event_name == 'pull_request'
+        id: code
+        uses: dorny/paths-filter@v4.0.3
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - "**"
+              - "!**/*.md"
+              - "!LICENSE"
+              - "!docs/**"
+              - "!assets/**"
+
   node:
     name: Node ${{ matrix.node }}
+    needs: [changes]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -25,7 +53,7 @@ jobs:
         node: ["20.19", "22", "24", "26"]
     services:
       postgres:
-        image: postgres:18-alpine
+        image: ${{ needs.changes.outputs.code == 'true' && 'postgres:18-alpine' || '' }}
         env:
           POSTGRES_USER: shop
           POSTGRES_PASSWORD: secret
@@ -34,29 +62,39 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U shop" --health-interval 2s --health-timeout 5s --health-retries 15
       redis:
-        image: redis:8-alpine
+        image: ${{ needs.changes.outputs.code == 'true' && 'redis:8-alpine' || '' }}
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v7
+      - if: needs.changes.outputs.code == 'true'
+        uses: pnpm/action-setup@v6
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm test
+      - if: needs.changes.outputs.code == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: needs.changes.outputs.code == 'true'
+        run: pnpm lint
+      - if: needs.changes.outputs.code == 'true'
+        run: pnpm test
         env:
           TRACEPANEL_TEST_POSTGRES: postgres://shop:secret@127.0.0.1:5432/shop
           TRACEPANEL_TEST_REDIS: redis://127.0.0.1:6379
-      - run: pnpm build
+      - if: needs.changes.outputs.code == 'true'
+        run: pnpm build
       # What `node --import @tracepanel/js/register` loads: it must start without the app.
-      - run: node --input-type=module -e "await import('./dist/register.js'); console.log('register loads')"
+      - if: needs.changes.outputs.code == 'true'
+        run: node --input-type=module -e "await import('./dist/register.js'); console.log('register loads')"
 
   bun:
     name: Bun
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
