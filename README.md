@@ -50,17 +50,14 @@ traces and serves the console.
 ## Setup
 
 Tracepanel is on unless `NODE_ENV` is `production`. `TRACEPANEL_ENABLED=0`
-turns it off and `TRACEPANEL_ENABLED=1` turns it on. It starts its agent on
-the first request. The agent keeps the traces in `.tracepanel/` in your
-project and serves the console. Open a page and click the badge in the
-corner.
+turns it off and `TRACEPANEL_ENABLED=1` turns it on. The app's first request
+starts the agent, which keeps the traces in `.tracepanel/` and serves the
+console. Open a page and click the badge in the corner.
 
 ### Express
 
-Start the app with Tracepanel loaded before it, so OpenTelemetry can
-instrument its HTTP server, Express and its database driver, and add the
-middleware. It puts the badge on HTML pages and gives every response its
-trace id:
+Start the app with Tracepanel loaded before it, and add the middleware. It
+puts the badge on HTML pages and gives every response its trace id:
 
 ```bash
 node --import @tracepanel/js/register server.js
@@ -74,10 +71,9 @@ const app = express();
 app.use(tracepanel());
 ```
 
-The flag is how Tracepanel gets in before the app. An ES module's imports
-all load before any of its code runs, so `import "@tracepanel/js/register"` at
-the top of `server.js` comes too late for Express and the database driver.
-Without the flag, either let the CLI add it:
+The flag loads Tracepanel before the app's imports, which `import
+"@tracepanel/js/register"` in `server.js` can't do. Without the flag, let the
+CLI add it:
 
 ```json
 { "scripts": { "dev": "tracepanel run node server.js" } }
@@ -91,12 +87,10 @@ import "@tracepanel/js/register";
 await import("./server.js");
 ```
 
-The agent starts by itself either way, on the app's first request.
-
 ### Fastify
 
 Load Tracepanel before the app as for Express, and register the plugin
-before the routes, so it sees each one as it is added:
+before the routes:
 
 ```bash
 node --import @tracepanel/js/register server.js
@@ -111,11 +105,7 @@ await app.register(tracepanel());
 app.get("/books/:id", async (request) => findBook(request.params.id));
 ```
 
-Each request is named by its route (`GET /books/:id`), and its handler is a
-step of its own, with the line that added the route. HTML pages get the
-badge, sent whole or streamed. An error Fastify answers with a 500 is the
-request's error, with its local variables; one it answers below 500, such
-as a validation error or a `statusCode: 404`, is the response.
+Each request is named by its route (`GET /books/:id`).
 
 ### Koa
 
@@ -139,10 +129,7 @@ router.get("/books/:id", async (ctx) => {
 app.use(router.routes());
 ```
 
-Each `@koa/router` route's handler is a step named by its route, and so is
-the request, nested routers' prefixes included. The badge goes on HTML pages,
-and on the answer Koa gives an error. `ctx.throw(404)` is the response, not
-an error.
+Each request is named by its `@koa/router` route.
 
 ### Hono
 
@@ -164,21 +151,14 @@ app.get("/books/:id", async (c) => c.json(await findBook(c.req.param("id"))));
 serve({ fetch: app.fetch });
 ```
 
-Each request is named by its route, a sub-app's base path included, and its
-handler is a step of its own. HTML pages get the badge, and the request's
-body goes into its trace as far as the handler read it. An `HTTPException`
-below 500, or what `app.onError` answers below 500, is the response.
-
 On Bun, add the same middleware and serve the app with `serve()` from
-`@tracepanel/js/bun` (see Bun below), which puts the badge on the response.
+`@tracepanel/js/bun` (see Bun below).
 
 ### NestJS
 
 Nest runs on Express: load Tracepanel the same way and add the same
 middleware in `main.ts`. Each request's handler is its controller method,
-such as `BooksController.list`, and the Nest `Logger`'s records go to the
-request's trace. An `HttpException` that answers below 500 is the response,
-not an error.
+such as `BooksController.list`.
 
 ```bash
 node --import @tracepanel/js/register dist/main.js
@@ -196,8 +176,9 @@ await app.listen(3000);
 
 ### GraphQL
 
-Add the plugin of your GraphQL server; load Tracepanel and its framework's
-middleware as above. GraphQL Yoga, on Express or any other server:
+Add the plugin of your GraphQL server, and load Tracepanel and its
+framework's middleware as above. GraphQL Yoga, on Express or any other
+server:
 
 ```js
 import { createYoga } from "graphql-yoga";
@@ -216,21 +197,13 @@ import { tracepanelApolloPlugin } from "@tracepanel/js/graphql";
 const server = new ApolloServer({ typeDefs, resolvers, plugins: [tracepanelApolloPlugin()] });
 ```
 
-Each request is named after its operation, such as `GraphQL query Books`, so
-traffic groups by operation rather than `POST /graphql`, and the console's
-GraphQL page lists them. The operation is a step with its parse and validate
-phases, and each of your resolvers is a step, such as `Book.author`, with
-the queries and calls it makes under it: an N+1 shows which field runs it.
-Fields without a resolver of their own are left out. An exception a resolver
-throws is the request's error though the client gets it with a 200; a
-`GraphQLError` you answer with, and a client's syntax or validation error,
-are not. The variables are in the request's body, their secrets masked.
+Each request is named after its operation, such as `GraphQL query Books`,
+and each of your resolvers is a step with its queries and calls under it.
 
 ### Next.js
 
-Next.js starts its own server: Tracepanel goes in from the instrumentation
-hook, and Next.js makes each request's root span itself. Keep the package out
-of the bundles, and put the badge in the root layout:
+Tracepanel goes in from the instrumentation hook. Keep the package out of the
+bundles, and put the badge in the root layout:
 
 ```ts
 // instrumentation.ts
@@ -261,26 +234,17 @@ export default function RootLayout({ children }) {
 }
 ```
 
-A request's handler is its page or route handler, named by its route
-(`/api/books/[id]`).
-
-In development the app's server also serves the console at `/__tracepanel__/`
-on its own origin, for this machine only, and the badge loads from there.
-`<Tracepanel />` records the pages in the browser too, as the Vite plugin
-does (see below). It takes the same options:
+In development the app's server serves the console at `/__tracepanel__/`.
+`<Tracepanel />` also records the pages in the browser, and takes the Vite
+plugin's options (see below). `browser={false}` leaves the recording out:
 
 ```tsx
 <Tracepanel browser={{ service: "shop-web", propagateTo: ["http://127.0.0.1:8000"] }} />
 ```
 
-The recording is inline in `<head>`, so it wraps `fetch` before the app's
-scripts run, even a client that keeps `fetch` from when it is made
-(`openapi-fetch`). `browser={false}` leaves it out.
-
 ### Nuxt
 
-Add the module and start `nuxt dev` with Tracepanel loaded, so it hooks the
-database driver as Nitro loads it:
+Add the module and start `nuxt dev` with Tracepanel loaded:
 
 ```ts
 // nuxt.config.ts
@@ -291,15 +255,11 @@ export default defineNuxtConfig({ modules: ["@tracepanel/js/nuxt"] });
 NODE_OPTIONS=--import=@tracepanel/js/register nuxt dev
 ```
 
-The module names each request by its route (`/api/books/:id`), puts the
-badge on server-rendered pages, and records the errors h3 answers with a 500.
-
 ### Bun
 
 `serve()` is `Bun.serve` with each route traced under its pattern, and
 `withTracepanel()` wraps any fetch handler, such as Elysia's `handle`. A Hono
-app is `serve({ fetch: app.fetch })`, with its `tracepanel()` middleware (see
-Hono above) naming its routes:
+app is `serve({ fetch: app.fetch })`, with its `tracepanel()` middleware:
 
 ```bash
 bun --preload @tracepanel/js/register server.ts
@@ -317,10 +277,9 @@ serve({
 
 ### An SPA on Vite
 
-A single-page app on Vite's dev server gets the badge from the plugin, whatever
-serves its API: an app Tracepanel traces, in Node or in Python. It puts the
-widget into `index.html` and serves the backend's console on Vite's origin,
-from the backend project's `.tracepanel/`:
+A single-page app on Vite's dev server gets the badge from the plugin,
+whatever serves its API, in Node or in Python. It serves the backend's
+console on Vite's origin, from the backend project's `.tracepanel/`:
 
 ```ts
 // vite.config.ts
@@ -329,47 +288,24 @@ import { tracepanel } from "@tracepanel/js/vite";
 export default { plugins: [tracepanel({ dir: "../backend" })] };
 ```
 
-When the page loads before the API's first request, the plugin starts the
-backend's agent itself, as the SDK would. The console answers this machine
-only, even with Vite on the network (`vite --host`): its traces and what it
-lets a local caller do, such as switching the user, are the developer's.
-
-An API on another origin exposes the trace's headers to the page on its CORS
-responses, so the badge lists each call the app makes. A backend that serves
-its own console (Django, FastAPI) is named with `console`:
+A backend that serves its own console (Django, FastAPI) is named with
+`console`:
 
 ```ts
 tracepanel({ console: "http://localhost:8000/__tracepanel__/" });
 ```
 
-The plugin also records the pages in the browser. Each view (the page's load,
-or a route change) is a trace, and so is each action on it: a click or a
-submit that called the API, named after the control (`click "Save"`), or
-background calls nobody started. Each has its calls, its errors and its
-console, with the line that logged each record, and lasts until its last
-call answered. The console lists them in Pages, the page's view first and
-its actions under it, and the badge's panel lists each action over the
-requests it made.
-
-A call to the page's own origin carries a W3C `traceparent`, so the console
-links it to the API's trace. While the panel's Profile toggle is on, the
-same calls carry `X-Tracepanel-Profile` (`1`, or `memory`), so an API on
-another origin, which never gets the toggle's cookie, profiles the request
-too, and so does each app it calls in turn. `propagateTo` names other
-origins, whose CORS must allow both headers (`cors()` and
-`allow_headers=["*"]` do):
+The plugin also records the pages in the browser: each view and each click
+or submit is a trace, with its API calls, errors and console output.
+`propagateTo` names the API origins to link to the page's traces. Their CORS
+must allow the `traceparent` and `X-Tracepanel-Profile` headers:
 
 ```ts
 tracepanel({ dir: "../backend", browser: { service: "shop-web", propagateTo: ["http://127.0.0.1:8000"] } });
 ```
 
-`browser: false` leaves the recording out. Vite's own client logs (its
-connection, hot reload) stay out of the pages' traces.
-
-Without Vite, call `record()` from `@tracepanel/js/browser` in the page, with the
-console on the page's origin (`api`, `/__tracepanel__/` by default).
-`ignoreSources` takes the path prefixes of scripts whose console isn't the
-page's, such as a dev server's client.
+`browser: false` leaves the recording out. Without Vite, call `record()` from
+`@tracepanel/js/browser` in the page.
 
 ## What it looks like
 
@@ -388,84 +324,28 @@ the line that ran it and the fix:
 
 ## What it records
 
-- HTTP requests, with the route and the handler that served them, and what
-  each one carried: its headers, query and cookies, the body as far as the
-  app read it, and the response's headers. Values under names such as
-  `password`, `token`, `session` or `csrf` are masked, and they never leave
-  your machine. A body is what the app read, up to 16 KB: in Express and
-  Nest what a body parser read (`req.body`, an upload's files by name and
-  size); in Next.js, Nuxt and under `withTracepanel()` the bytes the app's
-  own reads took from the request's stream, a copy of their start kept as
-  they pass. JSON and forms have their secrets masked, text is cut at
-  16 KB, and binary bodies are left out. A multipart form keeps its fields
-  and its files by name and size, never their contents, however large the
-  upload. JSON or a URL-encoded form past 16 KB is left out, since its
-  secrets can't be masked from a part of it. A body the app never reads is
-  not recorded, and Tracepanel never reads it or waits for it.
-- The request's session as the handler left it: express-session's or
-  cookie-session's `req.session` in Express and Nest, and in Nuxt the
-  sessions h3's `useSession()` read (nuxt-auth-utils' among them). Each
-  value is text, masked under a sensitive name and below one, and
-  nuxt-auth-utils' `secure` data always is. Next.js and Bun have no
-  session of their own, and a sealed cookie (iron-session, Auth.js) takes
-  the app's secret to read, so none is recorded there: `setUser()` names
-  the signed-in user instead.
-- A form's POST that redirects to another page: the panel on that page
-  lists the POST before it.
-- SQL from `pg` and `mysql2` (and so Drizzle, Knex, Sequelize, TypeORM and
-  Prisma's driver adapters), and from SQLite through `better-sqlite3`,
-  Node's `node:sqlite` and `libsql`, with the line of your code that ran each
-  statement. A statement no code of yours made, such as a session store's,
-  names the library code that asked for it, past the driver and the ORM;
-  so do Redis and MongoDB commands. Prisma's operations show as steps.
-- Transactions: BEGIN … COMMIT (or ROLLBACK) on a `pg` client, a `mysql2`
-  connection or a SQLite database, and better-sqlite3's `db.transaction()`,
-  with its statements and the calls made inside it, and its savepoints.
-- The console's EXPLAIN of a SQLite query (EXPLAIN QUERY PLAN) runs on the
-  app's own connection, so a database in memory has a plan too.
-- Redis commands (`ioredis`, `redis`) and MongoDB commands, with their own
-  N+1 and duplicates.
-- Outgoing HTTP calls: `fetch()`, and `node:http` clients such as axios, on
-  Node and on Bun.
-- BullMQ: each job a worker runs is a task, each job the app adds a step.
-  While a job is in flight, the console's Tasks page lists it under Now:
-  queued, running in its worker, or waiting for its next attempt, and the
-  workers that run them.
-- Logs made during a request: `console` calls, Nest's `Logger`, and pino's
-  and winston's loggers, with their fields and the error they carry.
-- Errors thrown in a handler, with your frames, their source and their
-  local variables. Node's inspector reads the variables as the error is
-  thrown, in your own frames only, while a request runs; a value under a
-  name such as `password` or `token` is masked, and a long one is cut. A
-  caller waiting on an `await` has none. Each error read costs about a
-  millisecond, at most 50 a second; a process under a debugger
-  (`--inspect`) is left alone.
-- Where a request's time goes in code, for the console's flame graph, when
-  it asks: the panel's Profile toggle, or an `X-Tracepanel-Profile: 1`
-  header. V8's profiler samples the whole process, and one event loop runs
-  every request at once, so a profile keeps the samples taken while its
-  request was the only one running, and counts the rest
-  (`tracepanel.dropped_samples`). Time spent waiting on I/O is not in it.
-  Every profile counts the garbage collector's runs and their pauses.
-  A request profiled because it asked asks the same of the apps it calls:
-  each call that carries a `traceparent` (fetch, node:http, axios, got)
-  carries `X-Tracepanel-Profile` too, so the panel's toggle profiles the
-  whole chain. `TRACEPANEL_PROFILE=1` asks nothing of them: each app's own
-  setting decides.
-- A profile's memory too, when asked: `X-Tracepanel-Profile: memory`, the
-  `tracepanel_profile=memory` cookie (the panel's Profile toggle offers
-  it), or `TRACEPANEL_PROFILE_MEMORY=1`. V8's sampling heap profiler takes
-  about one allocation in every 32 KB with its stack: the profile shows the
-  heap's peak above where the request started, what V8 allocated in all
-  (on Node 26), and the 50 sites whose allocations still lived at its end.
-  The heap is the whole process's, so a request that ran beside others says
-  so. It costs: code runs about 15% slower while it is sampled, and reading
-  the sampler's profile makes V8 collect the whole heap once at the end of
-  each such request, after its response, which stops the process for a few
-  milliseconds on a small heap and over 100 ms on a heap of a few hundred
-  MB. Leave it off when you measure time. Not on Bun.
-- The caller's trace, when a request carries a W3C `traceparent`: the agent
-  links the two.
+- HTTP requests: route, handler, headers, query, cookies and the body the app
+  read, secrets masked.
+- The session as the handler left it: express-session, cookie-session, h3's
+  `useSession()`.
+- A form's POST that redirects, listed on the next page's panel.
+- SQL from `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and
+  Prisma.
+- SQLite from `better-sqlite3`, `node:sqlite` and `libsql`.
+- The line of your code that ran each query.
+- Transactions and their savepoints, with the statements inside them.
+- Redis commands from `ioredis` and `redis`, and MongoDB commands.
+- Outgoing HTTP calls from `fetch()` and `node:http` clients such as axios.
+- BullMQ jobs as tasks, and the jobs in flight.
+- Logs from `console`, pino, winston and Nest's `Logger`, with their fields.
+- Errors thrown in a handler, with your frames, their source and local
+  variables.
+- Where a request's CPU time and memory go, when you ask for a profile, on
+  Node.
+- The caller's trace, when a request carries a W3C `traceparent`.
+
+What each integration records, and its limits, are in
+[Integrations](https://tracepanel.dev/docs/javascript/integrations).
 
 ## Your own steps and traces
 
@@ -500,7 +380,7 @@ export default defineConfig({
 Each test runs as a trace named after the test, with its queries in it. A
 request the test makes of a server it started (supertest, `fetch()`) is a
 trace of its own, linked to the test's in the console. Work in `beforeAll` is
-outside every test's trace; `beforeEach` and `afterEach` run inside it.
+outside every test's trace. `beforeEach` and `afterEach` run inside it.
 
 When the test passes, the agent looks at its traces. An issue of a kind in
 `failOn` (`n+1` and `duplicates` by default) fails the test with the issue,
@@ -551,9 +431,9 @@ setUser({ id: customer.id, username: customer.email });
 
 Call `setUser()` where the app knows who is signed in, such as its auth
 middleware. The request's trace gets `user.id`, and `user.username` and
-`user.email` when given, as the Python SDK records them. `setUser(null)`
-marks a request nobody signed in to. The username and email stay on your
-machine. Outside a trace it does nothing.
+`user.email` when given. `setUser(null)` marks a request nobody signed in
+to. The username and email stay on your machine. Outside a trace it does
+nothing.
 
 ## Settings
 
