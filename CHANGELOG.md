@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- In the browser, a call still open when its view or action goes out (a
+  route change, the tab going away, the 15-second limit) is sent as far
+  as it got: its time until then, marked `http.unfinished: true`, with no
+  status code. It was sent lasting 0 µs. Its answer arriving later
+  changes nothing and sends nothing again.
+- In the browser, a call with no answer (a network error, CORS, an
+  abort, an XMLHttpRequest's timeout) no longer reads
+  `http.response.status_code: 0`: it fails with why, in `error.type`
+  (`TypeError`, `AbortError`, `NetworkError`, `timeout`), as
+  OpenTelemetry has it.
+
 ## 0.9.0 (2026-10-30)
 
 Needs `@tracepanel/agent` 0.9.0 (installed with it). The agent links Apollo
