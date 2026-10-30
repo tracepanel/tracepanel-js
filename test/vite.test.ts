@@ -50,6 +50,7 @@ beforeEach(() => {
   root = join(root, "front");
   process.env.TRACEPANEL_AGENT_BIN = FAKE;
   delete process.env.TRACEPANEL_CONSOLE;
+  delete process.env.TRACEPANEL_DIR;
 });
 
 afterEach(() => {
@@ -72,6 +73,15 @@ test("a client on another machine gets no console", () => {
 });
 
 test("the page's first load starts the backend's agent when none runs, and gets its console", async () => {
+  const base = await vite({ dir: "../backend" });
+
+  const response = await fetch(`${base}/__tracepanel__/widget.min.js`);
+
+  expect([response.status, await response.text()]).toEqual([200, "console /widget.min.js"]);
+});
+
+test("a store given by its absolute path is where the console is found", async () => {
+  process.env.TRACEPANEL_DIR = join(root, "..", "backend", "store");
   const base = await vite({ dir: "../backend" });
 
   const response = await fetch(`${base}/__tracepanel__/widget.min.js`);
