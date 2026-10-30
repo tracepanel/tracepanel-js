@@ -9,6 +9,9 @@
   orders` and grouped without them. Its statement keeps them, a line
   comment (`-- a note`) closed as `/* a note */` when put on one line, so
   the line it ended still reads as SQL.
+- The Vite plugin finds the console of a store given by its absolute
+  path (`TRACEPANEL_DIR=/srv/app/.tracepanel`). It looked for it under
+  each folder up from the project and never found it.
 
 ## 0.8.0 (2026-10-29)
 

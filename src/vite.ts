@@ -13,7 +13,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Starter } from "./agent.js";
 import { answeredHere, forward, PREFIX } from "./proxy.js";
 
@@ -52,18 +52,26 @@ interface Plugin {
 function consoleAddress(options: TracepanelViteOptions, root: string): string | undefined {
   const given = options.console ?? process.env.TRACEPANEL_CONSOLE;
   if (given) return given;
+  const store = process.env.TRACEPANEL_DIR ?? ".tracepanel";
+  // A store given by its absolute path is the one: no folder to look up from.
+  if (isAbsolute(store)) return read(join(store, "console.addr"));
   const starts = options.dir ? [resolve(root, options.dir)] : [root];
   for (const start of starts) {
     let folder = start;
     for (;;) {
-      const file = join(folder, process.env.TRACEPANEL_DIR ?? ".tracepanel", "console.addr");
-      if (existsSync(file)) return readFileSync(file, "utf8").trim() || undefined;
+      const file = join(folder, store, "console.addr");
+      if (existsSync(file)) return read(file);
       const parent = dirname(folder);
       if (parent === folder) break;
       folder = parent;
     }
   }
   return undefined;
+}
+
+/** An address file's address, if it has one. */
+function read(file: string): string | undefined {
+  return existsSync(file) ? readFileSync(file, "utf8").trim() || undefined : undefined;
 }
 
 /**
