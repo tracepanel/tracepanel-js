@@ -23,6 +23,8 @@ const requests: Request[] = [];
 const announced: { id: string; name: string; open: boolean }[] = [];
 // The page's XMLHttpRequests: the URL each was opened for and the headers set on it, answered at once.
 const xhrs: { url: string; headers: Record<string, string> }[] = [];
+// The slow call's answer: it waits until the test lets it go.
+let answerSlow: () => void = () => undefined;
 
 /** The trace named so once the recording sent it: a view or an action ends when nothing happened for a second. */
 async function sentTrace(name: string): Promise<Doc> {
@@ -44,7 +46,8 @@ function button(label: string, url: string): HTMLButtonElement {
 }
 
 beforeAll(() => {
-  // The page's network: the console takes the traces, the API answers, /boom with a 500.
+  // The page's network: the console takes the traces, the API answers, /boom with a 500, /slow when let go; /down
+  // never answers (fetch rejects).
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     if (request.url.endsWith("/__tracepanel__/api/ingest")) {
@@ -52,6 +55,8 @@ beforeAll(() => {
       return new Response(null, { status: 202 });
     }
     requests.push(request);
+    if (request.url.includes("down")) throw new TypeError("Failed to fetch");
+    if (request.url.includes("slow")) await new Promise<void>((resolve) => (answerSlow = resolve));
     return new Response("{}", { status: request.url.includes("boom") ? 500 : 200 });
   };
   const opened = new WeakMap<XMLHttpRequest, { url: string; headers: Record<string, string> }>();
@@ -64,7 +69,10 @@ beforeAll(() => {
     const sent = opened.get(this);
     if (sent) sent.headers[name] = value;
   };
+  // Answered with a 200 at once; /down with no answer (a network error).
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest) {
+    if (opened.get(this)?.url.includes("down")) this.dispatchEvent(new Event("error"));
+    else Object.defineProperty(this, "status", { value: 200 });
     this.dispatchEvent(new Event("loadend"));
   };
   window.addEventListener("tracepanel:page", (event) => announced.push((event as CustomEvent).detail));
@@ -282,4 +290,108 @@ test("an SPA's route change starts a view of the new page", async () => {
   history.pushState({}, "", "/books/2");
 
   expect((await sentTrace("/books/2")).attrs).toMatchObject({ "page.path": "/books/2", "page.trigger": "navigation" });
+});
+
+/** The page's call to `url` in `trace`. */
+function callTo(trace: Doc, url: string): Doc & { duration: number } {
+  const found = trace.spans.find((span) => span.kind === "http.client" && span.attrs["url.full"] === url);
+  if (!found) throw new Error(`no call to ${url} in ${trace.name}`);
+  return found as Doc & { duration: number };
+}
+
+test("an answered call keeps its status code, a 5xx failing it", async () => {
+  const action = await sentTrace('/books › click "Delete"');
+
+  expect(callTo(action, "http://app.test/api/boom")).toMatchObject({
+    status: "error",
+    attrs: {
+      "http.request.method": "GET",
+      "url.full": "http://app.test/api/boom",
+      "http.response.status_code": 500,
+    },
+  });
+  expect(callTo(action, "http://app.test/api/boom").attrs).not.toHaveProperty("error.type");
+
+  const view = await sentTrace('/books › click "Log"');
+
+  expect(callTo(view, "http://app.test/api/books")).toMatchObject({
+    status: "ok",
+    attrs: { "http.response.status_code": 200 },
+  });
+  expect(callTo(view, "http://app.test/api/books").attrs).not.toHaveProperty("error.type");
+  expect(callTo(view, "http://app.test/api/books").attrs).not.toHaveProperty("http.unfinished");
+});
+
+test("a fetch() with no answer fails with why, not a status code of 0", async () => {
+  const element = document.createElement("button");
+  element.textContent = "Offline";
+  element.addEventListener("click", () => void fetch("/api/down").catch(() => undefined));
+  document.body.append(element);
+  element.click();
+  const action = await sentTrace('/books/2 › click "Offline"');
+  const call = callTo(action, "http://app.test/api/down");
+
+  expect(action.status).toBe("error");
+  expect(call.status).toBe("error");
+  expect(call.attrs).toEqual({
+    "http.request.method": "GET",
+    "url.full": "http://app.test/api/down",
+    "url.scheme": "http",
+    "server.address": "app.test",
+    "server.port": 80,
+    "w3c.span_id": expect.any(String),
+    "error.type": "TypeError",
+  });
+});
+
+test("an XMLHttpRequest with no answer fails with why; an answered one keeps its status code", async () => {
+  const element = document.createElement("button");
+  element.textContent = "Xhr down";
+  element.addEventListener("click", () => {
+    for (const url of ["/api/down", "/api/xhr-ok"]) {
+      const request = new XMLHttpRequest();
+      request.open("GET", url);
+      request.send();
+    }
+  });
+  document.body.append(element);
+  element.click();
+  const action = await sentTrace('/books/2 › click "Xhr down"');
+  const failed = callTo(action, "http://app.test/api/down");
+  const answered = callTo(action, "http://app.test/api/xhr-ok");
+
+  expect(failed.status).toBe("error");
+  expect(failed.attrs["error.type"]).toBe("NetworkError");
+  expect(failed.attrs).not.toHaveProperty("http.response.status_code");
+
+  expect(answered.status).toBe("ok");
+  expect(answered.attrs["http.response.status_code"]).toBe(200);
+  expect(answered.attrs).not.toHaveProperty("error.type");
+});
+
+test("a view that ends with a call still open closes it as unfinished, then ignores its late answer", async () => {
+  history.pushState({}, "", "/orders");
+  const slow = fetch("/api/slow");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  history.pushState({}, "", "/orders/1");
+  const view = await sentTrace("/orders");
+  const call = callTo(view, "http://app.test/api/slow");
+
+  expect(call.duration).toBeGreaterThanOrEqual(40_000);
+  expect(call.status).toBe("ok");
+  expect(call.attrs).toEqual({
+    "http.request.method": "GET",
+    "url.full": "http://app.test/api/slow",
+    "url.scheme": "http",
+    "server.address": "app.test",
+    "server.port": 80,
+    "w3c.span_id": expect.any(String),
+    "http.unfinished": true,
+  });
+
+  answerSlow();
+  await slow;
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+
+  expect(sent.filter((trace) => trace.name === "/orders")).toHaveLength(1);
 });

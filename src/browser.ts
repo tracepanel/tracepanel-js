@@ -67,6 +67,10 @@ interface View {
   root: Span;
   w3cTraceId: string;
   pending: number;
+  /** Its calls not answered yet: closed as unfinished if it goes out before they answer. */
+  open: Set<Span>;
+  /** Sent: a call that answers after it changes nothing. */
+  sent: boolean;
   lastActivityMs: number;
   /** When the last call answered or the last error was thrown: where the trace ends. */
   endUs: number;
@@ -337,6 +341,8 @@ export function record(options: BrowserOptions = {}): void {
       root,
       w3cTraceId,
       pending: 0,
+      open: new Set(),
+      sent: false,
       lastActivityMs: performance.now(),
       endUs: startUs,
       timer: undefined,
@@ -362,6 +368,16 @@ export function record(options: BrowserOptions = {}): void {
   function finish(current: View): void {
     if (view === current) view = undefined;
     if (current.timer) clearTimeout(current.timer);
+    if (current.sent) return;
+    current.sent = true;
+    // A call still open (a route change, the tab going away, the longest wait) goes out as far as it got: no answer
+    // yet, so no status code, and marked unfinished.
+    const sentUs = nowUs();
+    for (const span of current.open) {
+      span.duration = sentUs - span.start;
+      span.attrs["http.unfinished"] = true;
+    }
+    current.open.clear();
     // Until its last call answered, not the quiet second after: a view, until the page's load too.
     const lastSpan = Math.max(...current.trace.spans.map((span) => span.start + span.duration));
     let end = Math.max(current.endUs, lastSpan, current.trace.start);
@@ -426,7 +442,8 @@ export function record(options: BrowserOptions = {}): void {
     method: string,
     raw: string,
   ): {
-    finish(status: number, failed: boolean): void;
+    /** Answered with `status`, or failed with no answer: `failure` names why (TypeError, AbortError, timeout). */
+    finish(status: number, failure?: string): void;
     traceparent?: string | undefined;
     profile?: string | undefined;
     page?: string;
@@ -454,18 +471,23 @@ export function record(options: BrowserOptions = {}): void {
       },
     };
     if (current.trace.spans.length < MAX_SPANS) current.trace.spans.push(span);
+    current.open.add(span);
     const propagated = propagate.has(url.origin);
     return {
       traceparent: propagated ? `00-${current.w3cTraceId}-${spanId}-01` : undefined,
       // Where a traceparent goes, the panel's Profile asks for a profile too.
       profile: propagated ? profileAsked() : undefined,
       page: current.trace.id,
-      finish(status, failed) {
+      finish(status, failure) {
+        current.pending -= 1;
+        // Its trace went out without it: closed there as unfinished.
+        if (!current.open.delete(span)) return;
         span.duration = nowUs() - span.start;
         current.endUs = Math.max(current.endUs, span.start + span.duration);
-        span.attrs["http.response.status_code"] = status;
-        if (failed || status >= 500) span.status = "error";
-        current.pending -= 1;
+        // No answer (the network, CORS, an abort): no status code, why it failed instead, as OpenTelemetry has it.
+        if (failure !== undefined) span.attrs["error.type"] = failure;
+        else span.attrs["http.response.status_code"] = status;
+        if (failure !== undefined || status >= 500) span.status = "error";
         touch(current);
       },
     };
@@ -484,10 +506,10 @@ export function record(options: BrowserOptions = {}): void {
         if (out.page) Object.defineProperty(arrived, PAGE, { value: out.page });
         return arrived;
       });
-      out.finish(response.status, false);
+      out.finish(response.status);
       return response;
     } catch (error) {
-      out.finish(0, true);
+      out.finish(0, (error instanceof Error && error.name) || "Error");
       throw error;
     }
   };
@@ -511,7 +533,12 @@ export function record(options: BrowserOptions = {}): void {
       if (out.traceparent) this.setRequestHeader("traceparent", out.traceparent);
       if (out.profile) this.setRequestHeader(PROFILE_HEADER, out.profile);
       if (out.page) Object.defineProperty(this, PAGE, { value: out.page, configurable: true });
-      this.addEventListener("loadend", () => out.finish(this.status, this.status === 0));
+      // No answer: why, from the event before loadend (a network error, an abort, the request's timeout).
+      let failure = "Error";
+      this.addEventListener("error", () => (failure = "NetworkError"));
+      this.addEventListener("abort", () => (failure = "AbortError"));
+      this.addEventListener("timeout", () => (failure = "timeout"));
+      this.addEventListener("loadend", () => out.finish(this.status, this.status === 0 ? failure : undefined));
     }
     return sendXhr.call(this, body);
   };
