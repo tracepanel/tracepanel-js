@@ -1,6 +1,6 @@
 {
   "name": "@tracepanel/js",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Traces and logs for Node.js and Bun apps (Express, Fastify, Koa, Hono, NestJS, Next.js, Nuxt, Bun.serve, GraphQL Yoga, Apollo Server): every request with its SQL, logs and errors, N+1 queries found",
   "license": "MIT",
   "type": "module",
@@ -98,7 +98,7 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@prisma/instrumentation": "^7.10.0",
-    "@tracepanel/agent": "~0.8.0",
+    "@tracepanel/agent": "~0.9.0",
     "import-in-the-middle": "^3.5.2"
   },
   "peerDependencies": {
