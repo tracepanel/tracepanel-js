@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.9.2 (2026-10-30)
+
+Needs `@tracepanel/agent` 0.9.2 (installed with it), whose console reads a
+call the browser left unfinished and a call with no answer, below.
 
 ### Fixed
 
