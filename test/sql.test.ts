@@ -46,4 +46,39 @@ describe("sql", () => {
       "SELECT Order Items",
     ]);
   });
+
+  it("closes a line comment on one line and names and groups a query without its comments, as the agent does", () => {
+    const sql =
+      "/*controller='orders',traceparent='00-4bf9-01'*/ SELECT id\n-- the page's rows\nFROM orders " +
+      "WHERE note = '-- not /* a */ comment' AND id IN ($1, $2)";
+
+    expect([statement(sql), fingerprint(sql), spanName(sql)]).toEqual([
+      "/*controller='orders',traceparent='00-4bf9-01'*/ SELECT id /* the page's rows */ FROM orders " +
+        "WHERE note = '-- not /* a */ comment' AND id IN ($1, $2)",
+      "SELECT id FROM orders WHERE note = '-- not /* a */ comment' AND id IN (...)",
+      "SELECT orders",
+    ]);
+  });
+
+  it("leaves out a leading traceparent comment", () => {
+    const sql = "/*traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'*/ SELECT * FROM orders";
+
+    expect([statement(sql), fingerprint(sql), spanName(sql)]).toEqual([sql, "SELECT * FROM orders", "SELECT orders"]);
+  });
+
+  it("closes a line comment mid-statement, a */ in it kept from ending it", () => {
+    const sql = "SELECT count(*)\n  -- the */ count\n  FROM books --\nWHERE id = $1";
+
+    expect([statement(sql), fingerprint(sql), spanName(sql)]).toEqual([
+      "SELECT count(*) /* the * / count */ FROM books /* */ WHERE id = $1",
+      "SELECT count(*) FROM books WHERE id = $1",
+      "SELECT COUNT books",
+    ]);
+  });
+
+  it("leaves -- and /* in a string or a quoted name as they are", () => {
+    const sql = "SELECT \"a--b\", `c/*d` FROM notes WHERE body = 'it''s -- not /* a comment' AND x = \"--\"";
+
+    expect([statement(sql), fingerprint(sql), spanName(sql)]).toEqual([sql, sql, "SELECT notes"]);
+  });
 });
