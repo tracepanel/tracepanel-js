@@ -35,7 +35,7 @@ interface Job {
   data: unknown;
   timestamp: number;
   attemptsMade: number;
-  opts: { attempts?: number };
+  opts: { attempts?: number; "tracepanel-profile"?: string };
 }
 
 /** BullMQ's Queue, as far as the instrumentation sees it: add() and addBulk() resolve with the jobs they added. */
@@ -43,15 +43,15 @@ class Queue {
   static next = 0;
   constructor(readonly name: string) {}
 
-  async add(name: string, data: unknown, opts: { attempts?: number } = {}): Promise<Job> {
+  async add(name: string, data: unknown, opts: Job["opts"] = {}): Promise<Job> {
     return this.job(name, data, opts);
   }
 
-  async addBulk(jobs: { name: string; data: unknown }[]): Promise<Job[]> {
-    return jobs.map((job) => this.job(job.name, job.data, {}));
+  async addBulk(jobs: { name: string; data: unknown; opts?: Job["opts"] }[]): Promise<Job[]> {
+    return jobs.map((job) => this.job(job.name, job.data, job.opts ?? {}));
   }
 
-  private job(name: string, data: unknown, opts: { attempts?: number }): Job {
+  private job(name: string, data: unknown, opts: Job["opts"]): Job {
     Queue.next += 1;
     return { id: String(Queue.next), name, queueName: this.name, data, timestamp: Date.now(), attemptsMade: 0, opts };
   }
@@ -265,6 +265,123 @@ describe("task events", () => {
       expect.stringMatching(`:${process.pid}$`),
       expect.any(String),
     ]);
+  });
+});
+
+describe("a profiled trace's jobs", () => {
+  /** The jobs a request adds, one with add() and two with addBulk(); `asked`, `reason`: how it asked for a profile. */
+  async function addedIn(
+    asked: string | undefined,
+    reason: string | undefined,
+    add: (queue: Queue) => Promise<unknown> = async (queue) => {
+      await queue.add("receipt", { order: 7 });
+      await queue.addBulk([
+        { name: "invoice", data: 7 },
+        { name: "label", data: 7, opts: { attempts: 3 } },
+      ]);
+    },
+  ): Promise<Job[]> {
+    const queue = new Queue("orders");
+    const jobs: Job[] = [];
+    const original = { add: queue.add, addBulk: queue.addBulk };
+    queue.add = async (...args) => {
+      const job = await original.add.apply(queue, args);
+      jobs.push(job);
+      return job;
+    };
+    queue.addBulk = async (...args) => {
+      const added = await original.addBulk.apply(queue, args);
+      jobs.push(...added);
+      return added;
+    };
+    const root = tracer.startSpan("POST", {
+      kind: SpanKind.SERVER,
+      attributes: {
+        "http.request.method": "POST",
+        "url.path": "/orders",
+        ...(asked ? { "tracepanel.profile": asked } : {}),
+        ...(reason ? { "tracepanel.profile.reason": reason } : {}),
+      },
+    });
+    await context.with(trace.setSpan(context.active(), root), () => add(queue));
+    root.end();
+    await pause(60);
+    return jobs;
+  }
+
+  it("ask the worker for a profile in their options: what the request asked for", async () => {
+    const memory = await addedIn("memory", "header");
+    const time = await addedIn("1", "cookie");
+
+    expect(memory.map((job) => job.opts)).toEqual([
+      { "tracepanel-profile": "memory" },
+      { "tracepanel-profile": "memory" },
+      { attempts: 3, "tracepanel-profile": "memory" },
+    ]);
+
+    expect(time.map((job) => job.opts)).toEqual([
+      { "tracepanel-profile": "1" },
+      { "tracepanel-profile": "1" },
+      { attempts: 3, "tracepanel-profile": "1" },
+    ]);
+  });
+
+  it("ask from where the app's code called profile() on", async () => {
+    const jobs = await addedIn(undefined, undefined, async (queue) => {
+      await queue.add("before", 1);
+      processor.profile(false);
+      await queue.add("after", 1);
+    });
+
+    expect(jobs.map((job) => [job.name, job.opts])).toEqual([
+      ["before", {}],
+      ["after", { "tracepanel-profile": "1" }],
+    ]);
+  });
+
+  it("ask nothing when the request didn't, or only the setting profiles it; the app's own option is kept", async () => {
+    const plain = await addedIn(undefined, undefined);
+    config.profile = true;
+    let setting: Job[];
+    try {
+      setting = await addedIn(undefined, undefined);
+    } finally {
+      config.profile = false;
+    }
+    const own = await addedIn("memory", "header", async (queue) => {
+      await queue.add("receipt", 7, { "tracepanel-profile": "1" });
+    });
+
+    expect(plain.map((job) => job.opts)).toEqual([{}, {}, { attempts: 3 }]);
+
+    expect(setting.map((job) => job.opts)).toEqual([{}, {}, { attempts: 3 }]);
+
+    expect(own.map((job) => job.opts)).toEqual([{ "tracepanel-profile": "1" }]);
+  });
+
+  it("are profiled by the worker, their profile.reason the parent's, and ask the same of the jobs they add", async () => {
+    const [job, , plain] = await addedIn("memory", "header");
+    const followUps: Job[] = [];
+    const worker = new Worker("orders", async (run) => {
+      const until = performance.now() + 20;
+      while (performance.now() < until);
+      if (run.name === "receipt") followUps.push(await new Queue("mail").add("send receipt", run.data));
+    });
+    sent.length = 0;
+    await perform(worker, job as Job);
+    const asked = sent.at(-1) as Trace;
+    delete plain?.opts["tracepanel-profile"];
+    await perform(worker, plain as Job);
+    const unasked = sent.at(-1) as Trace;
+
+    expect(asked.kind).toBe("task");
+    expect(asked.attrs["profile.reason"]).toBe("parent");
+    expect(asked.profile).toEqual(expect.objectContaining({ samples: expect.any(Number) }));
+
+    expect(followUps.map((added) => added.opts)).toEqual([{ "tracepanel-profile": "memory" }]);
+
+    expect(unasked.attrs["profile.reason"]).toBeUndefined();
+    expect(unasked.profile).toBeUndefined();
   });
 });
 

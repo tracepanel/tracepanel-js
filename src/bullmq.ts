@@ -6,11 +6,16 @@
 // `retried` (with the error) when BullMQ will run it again, or `finished`. A worker says it is there as it starts
 // running, and every 30 seconds each process sends a `heartbeat` per worker with the jobs it runs, so a job whose
 // process was killed leaves the list. A job's id there is its queue's name and its id: BullMQ counts ids per queue.
+//
+// A job added in a trace profiled because its request asked (or its code called profile()) asks the same of the job's
+// trace: its options carry `tracepanel-profile` ("1", or "memory"), which BullMQ keeps with the job, as a Celery
+// task's headers carry it in the Python SDK. The worker profiles the job's trace, its profile.reason "parent".
 
 import { hostname } from "node:os";
 import { type Attributes, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { InstrumentationBase, InstrumentationNodeModuleDefinition, isWrapped } from "@opentelemetry/instrumentation";
 import { sends, type TaskEvent } from "./agent.js";
+import { type Asked, ATTRIBUTE, asking, REASON_ATTRIBUTE } from "./profile.js";
 import { masked } from "./request.js";
 
 interface Job {
@@ -21,7 +26,7 @@ interface Job {
   timestamp: number;
   delay?: number;
   attemptsMade: number;
-  opts?: { attempts?: number };
+  opts?: { attempts?: number; [PROFILE]?: unknown };
 }
 
 interface Worker {
@@ -41,10 +46,12 @@ interface BullMQ {
 /** Where task events go: the process's Tracepanel (its processor), which knows the active trace too. */
 export interface Events {
   taskEvent(event: TaskEvent): void;
-  current(): { building: { trace: { id: string } }; spanId: string | null } | undefined;
+  current(): { building: { trace: { id: string }; asked?: Asked | undefined }; spanId: string | null } | undefined;
 }
 
 const SYSTEM = "bullmq";
+/** The job option that asks the worker to profile the job's trace: "1", or "memory". */
+export const PROFILE = "tracepanel-profile";
 /** How often a worker says it is alive, with the jobs it runs: the agent drops a running one after 2 minutes. */
 export const HEARTBEAT_MS = 30_000;
 /** Arguments in a task event are for a glance at a list. */
@@ -226,6 +233,11 @@ export class BullMQInstrumentation extends InstrumentationBase {
     return current?.spanId ? { traceId: current.building.trace.id, spanId: current.spanId } : undefined;
   }
 
+  /** What the active trace asks to be profiled for, when its request's ask (or its code) profiles it. */
+  private asked(): Asked | undefined {
+    return this.events?.current()?.building.asked;
+  }
+
   private processJob(original: Process): Process {
     const instrumentation = this;
     const tracer = this.tracer;
@@ -240,7 +252,13 @@ export class BullMQInstrumentation extends InstrumentationBase {
         retries: job.attemptsMade,
         args: eventArgs(job.data),
       });
-      const attributes = { ...taskAttrs(job), "tracepanel.kind": "task", "tracepanel.name": job.name };
+      const asked = asking(job.opts?.[PROFILE]);
+      const attributes = {
+        ...taskAttrs(job),
+        "tracepanel.kind": "task",
+        "tracepanel.name": job.name,
+        ...(asked ? { [ATTRIBUTE]: asked, [REASON_ATTRIBUTE]: "parent" } : {}),
+      };
       return tracer.startActiveSpan(job.name, { kind: SpanKind.CONSUMER, attributes }, async (span) => {
         let failed: unknown;
         let threw = false;
@@ -309,7 +327,11 @@ export class BullMQInstrumentation extends InstrumentationBase {
       return tracer.startActiveSpan(`enqueue ${name}`, { kind: SpanKind.PRODUCER, attributes }, async (span) => {
         const parent = instrumentation.parent();
         try {
-          const job = await original.call(this, name, ...rest);
+          const [data, opts, ...more] = rest;
+          const asked = instrumentation.asked();
+          const job = await (asked
+            ? original.call(this, name, data, withAsk(opts, asked), ...more)
+            : original.call(this, name, ...rest));
           if (job?.id) span.setAttribute("task.id", job.id);
           instrumentation.enqueued(queue, job, parent);
           return job;
@@ -325,10 +347,24 @@ export class BullMQInstrumentation extends InstrumentationBase {
     return function (this: { name: string }, jobs: unknown[]) {
       const queue = this.name;
       const parent = instrumentation.parent();
-      return original.call(this, jobs).then((added) => {
+      const asked = instrumentation.asked();
+      const marked = asked
+        ? jobs.map((job) =>
+            job !== null && typeof job === "object"
+              ? { ...job, opts: withAsk((job as { opts?: unknown }).opts, asked) }
+              : job,
+          )
+        : jobs;
+      return original.call(this, marked).then((added) => {
         for (const job of added ?? []) instrumentation.enqueued(queue, job, parent);
         return added;
       });
     };
   }
+}
+
+/** A job's options with the profile's ask, unless the app set the option itself. */
+function withAsk(opts: unknown, asked: Asked): Record<string, unknown> {
+  const own = opts !== null && typeof opts === "object" ? (opts as Record<string, unknown>) : {};
+  return PROFILE in own ? own : { ...own, [PROFILE]: asked };
 }

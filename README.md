@@ -452,7 +452,8 @@ profile(); // or profile({ memory: true })
 `profile()` profiles the rest of the current trace, a request's or a
 `trace()`'s, on Node. With `{ memory: true }` it profiles where the memory
 goes too. From then on the trace's outgoing calls (`fetch()`, `node:http`)
-ask the app they call for a profile too. It returns whether the trace is
+ask the app they call for a profile too, and the BullMQ jobs it adds ask
+the worker (a `tracepanel-profile` job option). It returns whether the trace is
 profiled; outside a trace, outside development, or with
 `TRACEPANEL_PROFILE_ENABLED=0` it does nothing and returns `false`.
 
@@ -462,11 +463,13 @@ The trace says why it was profiled in `profile.reason`:
 - `header`: the request had an `X-Tracepanel-Profile: 1` header.
 - `cookie`: the panel's Profile toggle.
 - `parent`: a call from another app's profiled trace (the header with a
-  `traceparent`).
+  `traceparent`), or a BullMQ job such a trace added.
 - `code`: `profile()`, or a root span the app marked with the
   `tracepanel.profile` attribute.
 
-A trace profiled already keeps its reason.
+A trace profiled already keeps its reason. A request that asked for a
+profile (header, cookie, parent) asks the same of its calls and jobs; a
+trace only the setting profiles asks nothing of them.
 
 ## Settings
 
