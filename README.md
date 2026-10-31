@@ -347,9 +347,7 @@ the line that ran it and the fix:
 - Errors thrown in a handler, with your frames, their source and local
   variables.
 - Where a request's CPU time and memory go, when you ask for a profile, on
-  Node. The trace says why it was profiled in `profile.reason`: `setting`,
-  `header`, `cookie` (the panel's toggle), `parent` (another app's
-  profiled call) or `code`.
+  Node (see [Profiling from code](#profiling-from-code)).
 - The caller's trace, when a request carries a W3C `traceparent`.
 
 What each integration records, and its limits, are in
@@ -442,6 +440,33 @@ middleware. The request's trace gets `user.id`, and `user.username` and
 `user.email` when given. `setUser(null)` marks a request nobody signed in
 to. The username and email stay on your machine. Outside a trace it does
 nothing.
+
+## Profiling from code
+
+```js
+import { profile } from "@tracepanel/js";
+
+profile(); // or profile({ memory: true })
+```
+
+`profile()` profiles the rest of the current trace, a request's or a
+`trace()`'s, on Node. With `{ memory: true }` it profiles where the memory
+goes too. From then on the trace's outgoing calls (`fetch()`, `node:http`)
+ask the app they call for a profile too. It returns whether the trace is
+profiled; outside a trace, outside development, or with
+`TRACEPANEL_PROFILE_ENABLED=0` it does nothing and returns `false`.
+
+The trace says why it was profiled in `profile.reason`:
+
+- `setting`: `TRACEPANEL_PROFILE=1` profiles every trace.
+- `header`: the request had an `X-Tracepanel-Profile: 1` header.
+- `cookie`: the panel's Profile toggle.
+- `parent`: a call from another app's profiled trace (the header with a
+  `traceparent`).
+- `code`: `profile()`, or a root span the app marked with the
+  `tracepanel.profile` attribute.
+
+A trace profiled already keeps its reason.
 
 ## Settings
 

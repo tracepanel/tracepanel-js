@@ -4,6 +4,12 @@
 
 ### Added
 
+- `profile()` profiles the rest of the current trace from the app's code,
+  `profile({ memory: true })` its memory too, as `tracepanel.profile()`
+  does in the Python SDK. The trace's `profile.reason` is `code`, unless it
+  was profiled already, and its outgoing calls ask the app they call for a
+  profile from then on. It returns whether the trace is profiled: `false`
+  outside a trace, outside development or with profiling off.
 - `TRACEPANEL_SLOW_SQL_MS` and `TRACEPANEL_LONG_TRANSACTION_MS` take a
   limit per database, by its `db.system`:
   `TRACEPANEL_SLOW_SQL_MS=100,snowflake=3000` holds every database to

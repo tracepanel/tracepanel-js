@@ -5,6 +5,7 @@
 //     await span("load rows", () => loadRows());
 //   });
 //   setUser({ id: customer.id, username: customer.email });
+//   profile({ memory: true });
 
 import { type Attributes, trace as otel, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import type { Runtime } from "./runtime.js";
@@ -76,4 +77,20 @@ export function setUser(user: User | null): void {
     ...(user.username === undefined ? {} : { "user.username": user.username }),
     ...(user.email === undefined ? {} : { "user.email": user.email }),
   });
+}
+
+export interface ProfileOptions {
+  /** Where the trace's memory goes too, not only its CPU time. */
+  memory?: boolean;
+}
+
+/**
+ * Profiles the rest of the current trace (`profile.reason` "code", unless it is profiled already), its memory too
+ * with `{ memory: true }`; the calls it makes to other apps from now on ask them for a profile too. Whether the trace
+ * is profiled: false outside a trace, outside development, or with profiling off (TRACEPANEL_PROFILE_ENABLED=0).
+ */
+export function profile(options: ProfileOptions = {}): boolean {
+  const tracepanel = (globalThis as { [RUNTIME]?: Runtime })[RUNTIME];
+  if (!tracepanel) return false;
+  return tracepanel.processor.profile(options.memory === true);
 }
