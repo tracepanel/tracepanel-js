@@ -36,3 +36,29 @@ export function longValue(): void {
     [1, 2, 3].map((n) => ({ n, label: `n=${n}, (${"a,b"})` })),
   );
 }
+
+/** An order with a secret field, and a getter that must not run. */
+export class Order {
+  id = 7;
+  apiKey = "k-123";
+  declare live: number;
+}
+
+/** Secrets under keys inside values: a class's field, a Map's key, a nested object's, in a cycle. */
+export function withSecretKeys(): { order: Order; visits: Map<unknown, unknown>; cart: Record<string, unknown> } {
+  const order = new Order();
+  Object.defineProperty(order, "live", {
+    enumerable: true,
+    get() {
+      throw new Error("a getter ran");
+    },
+  });
+  const visits = new Map<unknown, unknown>([
+    ["token", "t-1"],
+    ["user", { name: "ann", password: "pw" }],
+  ]);
+  const cart: Record<string, unknown> = { items: ["book"], payment: { card: "visa", cvv_secret: "123" } };
+  cart.self = cart;
+  console.log(order, visits, cart); // keys
+  return { order, visits, cart };
+}

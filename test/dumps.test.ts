@@ -9,10 +9,10 @@ import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Config, loadConfig } from "../src/config.js";
 import { captureConsole } from "../src/console.js";
-import { argumentsAt, MAX_REPR } from "../src/dumps.js";
+import { argumentsAt, MAX_REPR, masked, reprOf } from "../src/dumps.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
-import { dirAndTable, inspectOrder, longValue, plainLine, withSecret } from "./app/debug.js";
+import { dirAndTable, inspectOrder, longValue, Order, plainLine, withSecret, withSecretKeys } from "./app/debug.js";
 
 // The project is test/app: its code is the app's, this file stands for the framework.
 const APP = new URL("./app/", import.meta.url);
@@ -187,6 +187,103 @@ describe("dumps", () => {
     ]);
 
     expect(printed).toEqual([["log", ["user:", { name: "ann" }, "s3cr3t"]]]);
+  });
+
+  it("masks the values of keys that name a secret inside an argument, on a copy: the terminal gets the app's", async () => {
+    let made: ReturnType<typeof withSecretKeys> | undefined;
+    const result = await app().request(() => {
+      made = withSecretKeys();
+    });
+
+    expect(logs(result)).toEqual([
+      {
+        level: "debug",
+        logger: "console",
+        message: [
+          "Order { id: 7, apiKey: '********', live: [Getter] } Map(2) {",
+          "  'token' => '********',",
+          "  'user' => { name: 'ann', password: '********' }",
+          "} <ref *1> {",
+          "  items: [ 'book' ],",
+          "  payment: { card: 'visa', cvv_secret: '********' },",
+          "  self: [Circular *1]",
+          "}",
+        ].join("\n"),
+        exception: null,
+        attrs: {
+          "log.kind": "dump",
+          "dump.lang": "javascript",
+          "dump.args": [
+            {
+              expr: "order",
+              repr: "Order {\n  id: 7,\n  apiKey: '********',\n  live: [Getter]\n}",
+              type: "Order",
+              len: null,
+            },
+            {
+              expr: "visits",
+              repr: "Map(2) {\n  'token' => '********',\n  'user' => {\n    name: 'ann',\n    password: '********'\n  }\n}",
+              type: "Map",
+              len: 2,
+            },
+            {
+              expr: "cart",
+              repr: [
+                "<ref *1> {",
+                "  items: [",
+                "    'book'",
+                "  ],",
+                "  payment: {",
+                "    card: 'visa',",
+                "    cvv_secret: '********'",
+                "  },",
+                "  self: [Circular *1]",
+                "}",
+              ].join("\n"),
+              type: "Object",
+              len: null,
+            },
+          ],
+          "code.origin": origin("keys", "withSecretKeys"),
+        },
+      },
+    ]);
+
+    // The app's values are as they were, and the terminal printed them.
+    const { order, visits, cart } = made as ReturnType<typeof withSecretKeys>;
+
+    expect([order instanceof Order, order.apiKey, visits.get("token"), visits.get("user"), cart.payment]).toEqual([
+      true,
+      "k-123",
+      "t-1",
+      { name: "ann", password: "pw" },
+      { card: "visa", cvv_secret: "123" },
+    ]);
+    expect(cart.self).toBe(cart);
+
+    expect(printed).toEqual([["log", [order, visits, cart]]]);
+    expect(printed[0]?.[1][0]).toBe(order);
+  });
+
+  it("leaves a value with no secret in it as it is", () => {
+    const order = { id: 7, items: [{ sku: "book" }] };
+    const cyclic: Record<string, unknown> = { name: "loop" };
+    cyclic.self = cyclic;
+
+    expect([masked(order), masked(cyclic), masked("token"), masked(null)]).toEqual([order, cyclic, "token", null]);
+    expect(masked(order)).toBe(order);
+  });
+
+  it("masks inside a Set's items, and a Map subclass's copy keeps its class", () => {
+    class Cache extends Map<string, string> {}
+    const cache = new Cache([["auth", "a-1"]]);
+    const set = new Set([{ id: 1, private_key: "pk" }]);
+
+    expect([reprOf(masked(cache)), reprOf(masked(set)).replace(/\s+/g, " ")]).toEqual([
+      "Cache(1) [Map] {\n  'auth' => '********'\n}",
+      "Set(1) { { id: 1, private_key: '********' } }",
+    ]);
+    expect(cache.get("auth")).toBe("a-1");
   });
 
   it("cuts a long value, and reads a call over several lines", async () => {

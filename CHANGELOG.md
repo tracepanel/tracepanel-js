@@ -27,9 +27,12 @@
   bundled or transpiled code (esbuild, tsc, Vite, a Next.js dev bundle)
   the call is found in the app's source through the source map, and read
   from the map's `sourcesContent` when it has it. An argument whose source
-  names a secret (`apiToken`, `password`) is masked. Only the app's own
-  calls inside a trace are dumps; console prints as before.
-  `TRACEPANEL_DUMPS=0` turns them off.
+  names a secret (`apiToken`, `password`) is masked, and so is the value
+  under a key that names one inside an argument (an object's key, a
+  class's field, a Map's key), on a copy for the dump: the app's value is
+  never changed, no getter runs, and the terminal prints it as before.
+  Only the app's own calls inside a trace are dumps; console prints as
+  before. `TRACEPANEL_DUMPS=0` turns them off.
 
 ### Fixed
 
