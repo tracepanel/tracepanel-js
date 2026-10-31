@@ -23,10 +23,20 @@
   `.debug()` or `.info()` with an argument that isn't a primitive (an
   object, an array, a Map, a function; not an Error) are dumps instead of
   log lines: each argument's source text, read from the call's line, its
-  value as Node prints it (16 KiB at most), its type and length. An
-  argument whose source names a secret (`apiToken`, `password`) is masked.
-  Only the app's own calls inside a trace are dumps; console prints as
-  before. `TRACEPANEL_DUMPS=0` turns them off.
+  value as Node prints it (16 KiB at most), its type and length. In
+  bundled or transpiled code (esbuild, tsc, Vite, a Next.js dev bundle)
+  the call is found in the app's source through the source map, and read
+  from the map's `sourcesContent` when it has it. An argument whose source
+  names a secret (`apiToken`, `password`) is masked. Only the app's own
+  calls inside a trace are dumps; console prints as before.
+  `TRACEPANEL_DUMPS=0` turns them off.
+
+### Fixed
+
+- A bundle's frames (a query's line, an error's frames) are mapped to the
+  app's source through an inline source map longer than 2,000 characters,
+  and through the `.map` beside a bundle that names none. They stayed in
+  the bundle.
 
 ## 0.9.2 (2026-10-30)
 
