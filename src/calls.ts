@@ -3,6 +3,7 @@
 // Tracepanel spans' names and attributes.
 
 import { createHash } from "node:crypto";
+import { MASK, sensitive, words } from "./masking.js";
 import type { Attrs } from "./model.js";
 
 function first(attrs: Attrs, ...keys: string[]): unknown {
@@ -12,8 +13,14 @@ function first(attrs: Attrs, ...keys: string[]): unknown {
   return undefined;
 }
 
-// Query parameters whose values are secrets: their values become "***".
-const SECRET = /(token|key|secret|password|passwd|pwd|auth|signature|sig|session|credential)/i;
+// A URL's own words for a secret in its query, besides sensitive()'s: an API's `key=`, a signed URL's `sig=` and
+// `X-Amz-Credential=`, `pwd=`. Whole words, so `monkey` and `design` stay.
+const URL_WORDS = new Set(["key", "sig", "pwd", "credential", "credentials"]);
+
+/** Whether a URL's query parameter holds a secret, word by word. */
+function secretParameter(name: string): boolean {
+  return sensitive(name) || words(name).some((word) => URL_WORDS.has(word));
+}
 
 /** The URL without its credentials, and with secret query values masked. */
 export function safeUrl(raw: string): string {
@@ -22,7 +29,7 @@ export function safeUrl(raw: string): string {
     url.username = "";
     url.password = "";
     for (const name of [...url.searchParams.keys()]) {
-      if (SECRET.test(name)) url.searchParams.set(name, "***");
+      if (secretParameter(name)) url.searchParams.set(name, MASK);
     }
     return url.toString();
   } catch {

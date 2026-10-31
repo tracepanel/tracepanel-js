@@ -134,7 +134,33 @@ const CONTROL =
   "[data-tracepanel-name],button,a,[role=button],[role=link],[role=menuitem],[role=tab],input[type=submit]," +
   "input[type=button],input[type=checkbox],input[type=radio],select,summary,label";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const SECRET = /(token|key|secret|password|passwd|pwd|auth|signature|sig|session|credential)/i;
+// A query parameter that holds a secret, word by word as masking.ts reads a name (this file is served alone, so it
+// carries its own copy): a secret's whole word (`token`, `auth`, not `author`), words written together
+// (`accesstoken`, `sessionid`), `api key`, and a URL's own `key`, `sig`, `pwd`, `credential`.
+const WORD_BREAKS = /[^a-zA-Z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/;
+const SECRET_WORDS = new Set(
+  (
+    "pass passwd password passwords passphrase passcode passkey secret secrets secretkey token tokens apikey apikeys " +
+    "auth oauth oauth2 authorization authentication cookie cookies session sessions csrf xsrf signature signatures " +
+    "private key sig pwd credential credentials"
+  ).split(" "),
+);
+const SECRET_ENDS = ["token", "secret", "password", "passwd", "apikey", "sessionid", "sessid"];
+const SECRET_STARTS = ["password", "apikey", "csrf", "xsrf", "session", "cookie"];
+const MASK = "********";
+
+function secretParameter(name: string): boolean {
+  const words = name
+    .split(WORD_BREAKS)
+    .filter((word) => word !== "")
+    .map((word) => word.toLowerCase());
+  return words.some(
+    (word) =>
+      SECRET_WORDS.has(word) ||
+      SECRET_ENDS.some((end) => word.endsWith(end)) ||
+      SECRET_STARTS.some((start) => word.startsWith(start)),
+  );
+}
 // The panel's Profile toggle: its cookie on the page's origin, and the header a call asks a backend with.
 const PROFILE_COOKIE = "tracepanel_profile";
 const PROFILE_HEADER = "X-Tracepanel-Profile";
@@ -176,7 +202,7 @@ function safeUrl(raw: string): URL | undefined {
     url.username = "";
     url.password = "";
     for (const name of [...url.searchParams.keys()]) {
-      if (SECRET.test(name)) url.searchParams.set(name, "***");
+      if (secretParameter(name)) url.searchParams.set(name, MASK);
     }
     return url;
   } catch {

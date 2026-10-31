@@ -8,8 +8,8 @@ import { Console } from "node:console";
 import { isAbsolute } from "node:path";
 import { Writable } from "node:stream";
 import { format, inspect, types } from "node:util";
+import { counted, MASK, masks, sensitive } from "./masking.js";
 import type { Log } from "./model.js";
-import { MASK, sensitive } from "./request.js";
 import { inApp, originOf, ownFile, parseStack, type StackFrame, sourceLines } from "./stack.js";
 
 /** How long an argument's text is at most, "… (truncated)" included. */
@@ -66,7 +66,7 @@ export function dump(
   const exprs = expressions(site, args.length);
   // What is shown of each argument: its secrets masked, the keys that name one as the argument's own name does.
   const shown = args.map((value, index): Shown & { text: string } => {
-    if (exprs?.[index] && sensitive(exprs[index])) return { value: MASK, byText: false, text: MASK };
+    if (exprs?.[index] && masks(exprs[index], value)) return { value: MASK, byText: false, text: MASK };
     const copy = masked(value);
     const text = inspectedText(copy.value);
     if (text !== undefined) return { ...copy, text: copy.byText ? maskText(text) : text };
@@ -76,7 +76,7 @@ export function dump(
   });
   const dumped = values.map((value, index): DumpArg => {
     const expr = exprs?.[index] ?? null;
-    if (expr !== null && sensitive(expr)) return { expr, repr: MASK, type: typeOf(value), len: null };
+    if (expr !== null && masks(expr, value)) return { expr, repr: MASK, type: typeOf(value), len: null };
     const repr = cut(shown[index]?.text ?? "");
     const literal = expr !== null && (expr === repr || (typeof value === "string" && /^["'`]/.test(expr)));
     return { expr: literal ? null : expr, repr, type: typeOf(value), len: lengthOf(value) };
@@ -117,9 +117,9 @@ const MASK_DEPTH = INSPECT.depth + 1;
 const SHOWN_ITEMS = 100;
 
 /** A key that names a secret: a string's, a symbol's description. */
-function secretKey(key: unknown): boolean {
-  if (typeof key === "string") return sensitive(key);
-  return typeof key === "symbol" && key.description !== undefined && sensitive(key.description);
+function secretKey(key: unknown, value: unknown): boolean {
+  if (typeof key === "string") return masks(key, value);
+  return typeof key === "symbol" && key.description !== undefined && masks(key.description, value);
 }
 
 /** An object whose keys and items are looked into: not a proxy (its traps may do anything), a Date, a Buffer… */
@@ -159,7 +159,7 @@ function lookInto(value: unknown, depth: number, seen: Set<object>, found: Found
     let index = 0;
     for (const [key, item] of Map.prototype.entries.call(value)) {
       if (index++ >= SHOWN_ITEMS) break;
-      if (secretKey(key)) found.secret = true;
+      if (secretKey(key, item)) found.secret = true;
       inner(key);
       inner(item);
     }
@@ -174,7 +174,7 @@ function lookInto(value: unknown, depth: number, seen: Set<object>, found: Found
     const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
     if (!descriptor?.enumerable) continue;
     if (Array.isArray(value) && typeof key === "string" && Number(key) >= SHOWN_ITEMS) continue;
-    if (secretKey(key)) found.secret = true;
+    if (secretKey(key, descriptor.value)) found.secret = true;
     if ("value" in descriptor) inner(descriptor.value);
   }
 }
@@ -215,7 +215,7 @@ function maskedCopy(value: unknown, depth: number, copies: Map<object, unknown>)
     let index = 0;
     for (const [key, item] of Map.prototype.entries.call(value)) {
       const shown = index++ < SHOWN_ITEMS;
-      map.set(shown ? inner(key) : key, shown ? (secretKey(key) ? MASK : inner(item)) : item);
+      map.set(shown ? inner(key) : key, shown ? (secretKey(key, item) ? MASK : inner(item)) : item);
     }
   } else if (value instanceof Set) {
     const set = new Set();
@@ -234,7 +234,7 @@ function maskedCopy(value: unknown, depth: number, copies: Map<object, unknown>)
     // A getter stays one: inspect() shows [Getter] without calling it.
     if ("value" in descriptor) {
       const past = Array.isArray(value) && typeof key === "string" && Number(key) >= SHOWN_ITEMS;
-      descriptor.value = secretKey(key) ? MASK : past ? descriptor.value : inner(descriptor.value);
+      descriptor.value = secretKey(key, descriptor.value) ? MASK : past ? descriptor.value : inner(descriptor.value);
     }
     Reflect.defineProperty(copy, key, descriptor);
   }
@@ -281,6 +281,8 @@ export function maskText(text: string): string {
     if (!sensitive(name)) continue;
     const start = match.index + match[0].length;
     const end = valueEnd(text, start);
+    // A model's token counts: a number, or numbers only.
+    if (countsText(name, text.slice(start, end))) continue;
     out += `${text.slice(from, start)}'${MASK}'`;
     from = end;
     PRINTED_KEY.lastIndex = Math.max(end, start);
@@ -289,6 +291,11 @@ export function maskText(text: string): string {
   return out.replace(ASSIGNED, (whole, before: string, name: string) =>
     sensitive(name) ? `${before}${name}=${MASK}` : whole,
   );
+}
+
+/** Whether inspect()'s text of the value under `tokens` is a model's counts: a number, or an array of numbers. */
+function countsText(name: string, value: string): boolean {
+  return counted(name, 0) && /^(?:-?[\d.e+]+|\[[\s\d.e+,-]*\])$/.test(value.trim());
 }
 
 /** Where the value inspect() printed at `at` ends. */

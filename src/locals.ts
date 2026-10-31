@@ -12,7 +12,7 @@
 import { inspect, types } from "node:util";
 import { maskText } from "./dumps.js";
 import { call, connect, inspector, type Session } from "./inspector.js";
-import { MASK, sensitive } from "./request.js";
+import { MASK, masks } from "./masking.js";
 import { asyncFrames, inApp, parseStack, type StackFrame } from "./stack.js";
 
 // At most this many local variables of a frame, and the app's frames of an error, have their values kept.
@@ -54,7 +54,7 @@ interface Paused {
  * (`{ password: '********' }`), from inspect()'s text: a proxy is shown as inspect() shows it, without its traps.
  */
 export function repr(name: string, value: unknown): string {
-  if (sensitive(name)) return MASK;
+  if (masks(name, value)) return MASK;
   try {
     // On one line: inspect() lays a long array out in rows.
     const text = maskText(inspect(value, INSPECT)).replace(/\s*\n\s*/g, " ");
