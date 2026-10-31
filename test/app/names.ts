@@ -23,3 +23,19 @@ export const shipOrder = (id: number): Error => {
   console.log(parcel); // shipOrder
   return new Error("shipOrder");
 };
+
+/** Callbacks: an anonymous one, and one a const names. Each calls `probe` and gives back an error made there. */
+export function eachOrder(ids: number[], probe: () => void): Error[] {
+  return ids.map((id) => {
+    probe(); // probe anonymous
+    return new Error(`order ${id}`); // anonymous
+  });
+}
+
+export function eachParcel(ids: number[], probe: () => void): Error[] {
+  const onParcel = (id: number): Error => {
+    probe(); // probe onParcel
+    return new Error(`parcel ${id}`); // onParcel
+  };
+  return ids.map(onParcel);
+}

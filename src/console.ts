@@ -6,7 +6,7 @@ import type { Config } from "./config.js";
 import { DUMPING, dump, isDump } from "./dumps.js";
 import type { Log } from "./model.js";
 import type { TracepanelProcessor } from "./processor.js";
-import { stackWithSites } from "./stack.js";
+import { captured } from "./stack.js";
 
 const LEVELS: Record<string, Log["level"]> = {
   debug: "debug",
@@ -95,14 +95,10 @@ export function captureConsole(processor: TracepanelProcessor, config?: Pick<Con
 
 /** The dump of a console call, or null: not the app's own call, or anything gone wrong (the call goes on). */
 function dumpOf(method: string, args: unknown[], root: string): Omit<Log, "span_id"> | null {
-  const limit = Error.stackTraceLimit;
   try {
-    Error.stackTraceLimit = Math.max(limit, DUMP_DEPTH);
-    const { stack, sites } = stackWithSites();
+    const { stack, sites } = captured(DUMP_DEPTH);
     return dump(method, args, stack, root, sites);
   } catch {
     return null;
-  } finally {
-    Error.stackTraceLimit = limit;
   }
 }
