@@ -10,7 +10,7 @@ import { Writable } from "node:stream";
 import { format, inspect, types } from "node:util";
 import type { Log } from "./model.js";
 import { MASK, sensitive } from "./request.js";
-import { inApp, mapped, originOf, ownFile, parseStack, type StackFrame, sourceLines } from "./stack.js";
+import { inApp, originOf, ownFile, parseStack, type StackFrame, sourceLines } from "./stack.js";
 
 /** How long an argument's text is at most, "… (truncated)" included. */
 export const MAX_REPR = 16_384;
@@ -103,22 +103,12 @@ export function dump(
 
 /**
  * The frame that called console: the first that is neither this package's, Node's, nor another console wrapper.
- * `sites`: where each line of the stack is in the code that ran (stackWithSites()); a line mapped here, through
- * the bundle's source map, has the source's text at hand even where the stack was mapped already (Node's
- * --enable-source-maps) to a file that isn't on disk.
+ * `sites`: the stack's CallSites (captured()), each line mapped from where its code ran, exactly.
  */
 function callSite(stack: string | undefined, sites?: readonly (StackFrame | undefined)[]): StackFrame | undefined {
-  const lines = (stack ?? "").split("\n").slice(1);
-  const aligned = sites?.length === lines.length;
-  for (const [index, line] of lines.entries()) {
-    const frame = parseStack(`Error\n${line}`)[0];
-    if (!frame || !isAbsolute(frame.file) || ownFile(frame.file) || /^console\./i.test(frame.function)) continue;
-    const ran = aligned ? sites?.[index] : undefined;
-    // The stack's name of the function (`Object.k`, `o.checkout`), in the source's names as the map has them.
-    const ours = ran ? mapped({ ...ran, function: frame.function }) : undefined;
-    return ours ?? frame;
-  }
-  return undefined;
+  return parseStack(stack, true, sites).find(
+    (frame) => isAbsolute(frame.file) && !ownFile(frame.file) && !/^console\./i.test(frame.function),
+  );
 }
 
 // How deep a value is looked into for secrets: past inspect()'s depth nothing is shown.

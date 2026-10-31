@@ -474,7 +474,7 @@ export class TracepanelProcessor implements SpanProcessor {
       type: cause.name || "Error",
       message: cause.message,
       handled: false,
-      frames: frames(cause.stack ?? "", this.config.root, this.locals?.take(cause.stack)),
+      frames: frames(cause.stack ?? "", this.config.root, this.locals?.take(cause.stack), cause),
       chain: [],
     });
   }

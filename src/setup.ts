@@ -32,6 +32,7 @@ import { profilePropagator } from "./propagation.js";
 import { traceBunQueries } from "./queries.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { SqliteInstrumentation } from "./sqlite.js";
+import { keepErrorSites } from "./stack.js";
 import { TransactionsInstrumentation } from "./transactions.js";
 
 export interface Options {
@@ -85,6 +86,8 @@ export function start(options: Options = {}): Runtime | undefined {
   const holder = globalThis as { [STARTED]?: boolean };
   if (!tracepanel || holder[STARTED] || nuxtDevProxy()) return tracepanel;
   holder[STARTED] = true;
+  // Errors' CallSites, kept as their stacks are written: their frames mapped exactly (stack.ts).
+  keepErrorSites();
   // The ESM loader hook, in the app's thread where Node can (module.register() is deprecated from Node 26). Bun 1.4
   // says it is Node 26 but has no registerHooks(): supportsSyncHooks() goes by the version only.
   if (supportsSyncHooks() && typeof nodeModule.registerHooks === "function") registerSyncHooks();

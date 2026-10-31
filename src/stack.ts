@@ -10,6 +10,8 @@ import type { Frame } from "./model.js";
 const CONTEXT_LINES = 5;
 // "    at fn (file:line:col)", "    at file:line:col", "    at async fn (file:line:col)".
 const FRAME = /^\s*at (?:async )?(?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/;
+// A line of a stack that is a frame, one per CallSite.
+const AT = /^\s{4}at /;
 // This package's own files are never the app's: its build, and its sources, where a runtime maps the build's frames
 // back through its source maps (Bun does).
 const OWN = fileURLToPath(new URL(".", import.meta.url));
@@ -32,17 +34,32 @@ export interface StackFrame {
 
 /**
  * The frames of a V8 stack, innermost first. `mapped`: a bundle's frames as the app's sources, through its source
- * map; without it, where the code that ran is, as the debugger sees it.
+ * map; without it, where the code that ran is, as the debugger sees it. `sites`: the stack's CallSites, one per line
+ * (captured(), errorSites()): a frame is mapped from where its code ran and where its function starts, exactly,
+ * though the stack's text was mapped already (Node's --enable-source-maps, a dev tool) or names a minifier's function.
  */
-export function parseStack(stack: string | undefined, mapped = true): StackFrame[] {
+export function parseStack(
+  stack: string | undefined,
+  mapped = true,
+  sites?: readonly (StackFrame | undefined)[],
+): StackFrame[] {
   const frames: StackFrame[] = [];
-  for (const line of (stack ?? "").split("\n").slice(1)) {
+  const lines = (stack ?? "").split("\n").filter((line) => AT.test(line));
+  const aligned = sites !== undefined && sites.length === lines.length;
+  for (const [index, line] of lines.entries()) {
     const match = FRAME.exec(line);
     if (!match) continue;
     const [, fn, location, lineno, column] = match;
     const file = location?.startsWith("file://") ? fileURLToPath(location) : (location ?? "");
     const frame = { function: fn ?? "<anonymous>", file, line: Number(lineno), column: Number(column) };
-    frames.push(mapped ? original(frame, Number(column)) : frame);
+    if (!mapped) {
+      frames.push(frame);
+      continue;
+    }
+    // The stack's name of the function (`Object.k`, `o.checkout`), mapped from the CallSite's place.
+    const site = aligned ? sites[index] : undefined;
+    const exact = site ? mappedFrame({ ...site, function: frame.function }) : undefined;
+    frames.push(exact ?? original(frame, Number(column)));
   }
   return frames;
 }
@@ -256,27 +273,91 @@ export function place(url: string, line: number, column: number, name = ""): Sta
   return original({ function: name, file, line, enclosing: { line, column } }, column);
 }
 
+type Prepare = (error: Error, sites: NodeJS.CallSite[]) => unknown;
+
 /**
- * The current stack, and the place in the code that ran of each of its lines: V8's CallSites, which no source map
- * changed (Node maps a stack with --enable-source-maps in its own prepareStackTrace only, a dev tool in its own). A
- * line the stack shows mapped to a source that isn't on disk is mapped here again from that place, where the map's
- * sourcesContent is at hand. The global prepareStackTrace is put back at once.
+ * A stack as the runtime would write it: the prepareStackTrace there before (a source-map tool's, Node's own on newer
+ * versions, Vitest's), else V8's own format, which Node's is without source maps.
  */
-export function stackWithSites(): { stack: string | undefined; sites: (StackFrame | undefined)[] } {
-  const stack = new Error().stack;
-  const previous = Error.prepareStackTrace;
-  let sites: (StackFrame | undefined)[] = [];
+function format(prepare: Prepare | undefined, error: Error, sites: NodeJS.CallSite[]): unknown {
+  if (prepare) return prepare.call(Error, error, sites);
+  let head: string;
   try {
-    Error.prepareStackTrace = (_error, callSites) => callSites;
-    const holder: { stack?: unknown } = {};
-    Error.captureStackTrace(holder);
-    if (Array.isArray(holder.stack)) sites = (holder.stack as NodeJS.CallSite[]).map(siteFrame);
+    head = Error.prototype.toString.call(error);
+  } catch {
+    head = "Error";
+  }
+  return sites.length === 0 ? head : `${head}\n    at ${sites.join("\n    at ")}`;
+}
+
+/** The stack and its CallSites of the current place, `depth` frames deep, once: the global hook is put back at once. */
+export function captured(depth: number): { stack: string | undefined; sites: (StackFrame | undefined)[] } {
+  const previous = Error.prepareStackTrace as Prepare | undefined;
+  const limit = Error.stackTraceLimit;
+  let sites: NodeJS.CallSite[] = [];
+  const holder: { stack?: unknown } = {};
+  try {
+    Error.stackTraceLimit = Math.max(limit, depth);
+    Error.prepareStackTrace = (error, callSites) => {
+      sites = callSites;
+      // Through the app's own hook, not this package's (it would keep these too).
+      return format(previous === hook ? inner : previous, error, callSites);
+    };
+    Error.captureStackTrace(holder, captured);
+    void holder.stack;
   } catch {
     // A runtime without CallSites: the stack as it is.
   } finally {
-    Error.prepareStackTrace = previous;
+    (Error as { prepareStackTrace?: unknown }).prepareStackTrace = previous;
+    Error.stackTraceLimit = limit;
   }
-  return { stack, sites };
+  // A hook that writes no text (it hands back the CallSites): no stack to read.
+  return typeof holder.stack === "string"
+    ? { stack: holder.stack, sites: sites.map(siteFrame) }
+    : { stack: undefined, sites: [] };
+}
+
+/** This package's prepareStackTrace while it records, and the one it runs inside it. */
+let hook: Prepare | undefined;
+let inner: Prepare | undefined;
+/** The CallSites of the errors whose stack was written, by error. */
+const ERROR_SITES = new WeakMap<object, NodeJS.CallSite[]>();
+// The last stacks written, and their CallSites, for a span's exception event, which has only the stack's text: a ring
+// a write only puts two references in, its text looked up when an error is recorded.
+const MAX_STACKS = 256;
+const ringStacks: unknown[] = new Array(MAX_STACKS);
+const ringSites: (NodeJS.CallSite[] | undefined)[] = new Array(MAX_STACKS);
+let ringAt = 0;
+
+/**
+ * Keep the CallSites of every error whose stack is written, for its frames: Error.prepareStackTrace becomes a hook
+ * that keeps them and returns what the one there before returns (a source-map tool's, Node's own), or V8's format.
+ * Not on an older Node with --enable-source-maps and no hook: its mapping can't be run from here. Once, while
+ * Tracepanel records; a hook set later replaces it, and the frames are read from the stack's text again.
+ */
+export function keepErrorSites(): void {
+  if (hook) return;
+  const existing = Error.prepareStackTrace as Prepare | undefined;
+  if (!existing && (process as { sourceMapsEnabled?: boolean }).sourceMapsEnabled) return;
+  inner = existing;
+  hook = function prepareStackTrace(error, sites) {
+    const stack = format(inner, error, sites);
+    if ((typeof error === "object" || typeof error === "function") && error !== null) ERROR_SITES.set(error, sites);
+    ringStacks[ringAt] = stack;
+    ringSites[ringAt] = sites;
+    ringAt = (ringAt + 1) % MAX_STACKS;
+    return stack;
+  };
+  Error.prepareStackTrace = hook;
+}
+
+/** The CallSites kept for an error, or for the stack it wrote, as frames; undefined when none were. */
+export function errorSites(error: unknown, stack: string | undefined): (StackFrame | undefined)[] | undefined {
+  const sites =
+    ((typeof error === "object" || typeof error === "function") && error !== null
+      ? ERROR_SITES.get(error)
+      : undefined) ?? (stack ? ringSites[ringStacks.lastIndexOf(stack)] : undefined);
+  return sites?.map(siteFrame);
 }
 
 function siteFrame(site: NodeJS.CallSite): StackFrame | undefined {
@@ -297,7 +378,7 @@ function siteFrame(site: NodeJS.CallSite): StackFrame | undefined {
 }
 
 /** A frame of the code that ran in the app's source, through this package's own reading of its source map. */
-export function mapped(frame: StackFrame): StackFrame | undefined {
+function mappedFrame(frame: StackFrame): StackFrame | undefined {
   const found = original(frame, frame.column ?? 1);
   return found === frame ? undefined : found;
 }
@@ -457,17 +538,6 @@ export function inApp(file: string, root: string): boolean {
 // Tracepanel's, more than V8's default 10.
 const ORIGIN_DEPTH = 64;
 
-/** The current stack, ORIGIN_DEPTH frames deep. */
-function deepStack(): string | undefined {
-  const limit = Error.stackTraceLimit;
-  Error.stackTraceLimit = Math.max(limit, ORIGIN_DEPTH);
-  try {
-    return new Error().stack;
-  } finally {
-    Error.stackTraceLimit = limit;
-  }
-}
-
 /** `file:line in function` of the innermost frame of the app's own code on the current stack, or null. */
 export function origin(root: string): string | null {
   return madeAt(root).origin;
@@ -543,7 +613,8 @@ function asks(file: string, root: string): boolean {
  * the call went through (`prisma`, `drizzle`), its innermost frame's, or null for a driver called directly.
  */
 export function madeAt(root: string): { origin: string | null; caller: string | null; orm: string | null } {
-  const stack = parseStack(deepStack());
+  const { stack: text, sites } = captured(ORIGIN_DEPTH);
+  const stack = parseStack(text, true, sites);
   const ormFrame = stack.find((frame) => ormOf(frame.file) !== null);
   const orm = ormFrame ? ormOf(ormFrame.file) : null;
   const own = stack.find((frame) => inApp(frame.file, root));
@@ -586,13 +657,15 @@ function sourceAround(file: string, line: number): { start: number | null; conte
 /**
  * An error's frames, outermost first as the console shows every SDK's, with the source of the app's own. `locals`:
  * the local variables of the app's frames, by the frame's place in the stack (innermost first), when they were read.
+ * `error`: the error, whose CallSites were kept as its stack was written (keepErrorSites()), else its stack's.
  */
 export function frames(
   stack: string | undefined,
   root: string,
   locals?: readonly (Record<string, string> | undefined)[],
+  error?: unknown,
 ): Frame[] {
-  return parseStack(stack)
+  return parseStack(stack, true, errorSites(error, stack))
     .map((frame, index) => {
       const own = inApp(frame.file, root);
       const { start, context } = own ? sourceAround(frame.file, frame.line) : { start: null, context: [] };

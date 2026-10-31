@@ -52,9 +52,14 @@
   (`placeOrder`, `Cart.checkout`, an arrow's `const shipOrder`), not as
   the minifier renamed them (`k`, `o.checkout`): in a dump's or a query's
   `code.origin`, an error's frames and a profile's flame graph. The name
-  is found where the function starts (V8's call site, or its definition
-  before the frame) and mapped there: the source map's `names`, else the
-  source's text.
+  is found where the function starts, from V8's call sites, and mapped
+  there: the source map's `names`, else the source's text. The SDK reads
+  the call sites of the stacks it takes itself (a query's, a dump's), and
+  keeps an error's as its stack is written: while Tracepanel records,
+  `Error.prepareStackTrace` is a hook that keeps them and returns what the
+  one before it returns (the app's, a source-map tool's, Node's), about
+  0.5 µs per stack written. Only a stack written without them (a hook the
+  app set later) is read by the function's definition before the frame.
 - An error's local variables mask the value under a key that names a
   secret inside a value (`{ password: '********' }`), not only a variable
   whose name does, and show a proxy without running its traps.

@@ -15,7 +15,7 @@ import { type Config, loadConfig } from "../src/config.js";
 import { captureConsole } from "../src/console.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
-import { parseStack, place } from "../src/stack.js";
+import { errorSites, frames, keepErrorSites, madeAt, parseStack, place } from "../src/stack.js";
 
 const SOURCE = new URL("./app/names.ts", import.meta.url);
 const manager = new AsyncLocalStorageContextManager().enable();
@@ -26,8 +26,11 @@ let app: {
   placeOrder(total: number): Error;
   Cart: new () => { checkout(): Error };
   shipOrder(id: number): Error;
+  eachOrder(ids: number[], probe: () => void): Error[];
+  eachParcel(ids: number[], probe: () => void): Error[];
 };
 const log = console.log;
+const prepare = Error.prepareStackTrace;
 
 /** `src/names.ts:<line>`: the line of the source with this comment. */
 function line(comment: string): string {
@@ -74,6 +77,7 @@ beforeAll(() => {
 
 afterAll(() => {
   console.log = log;
+  (Error as { prepareStackTrace?: unknown }).prepareStackTrace = prepare;
   manager.disable();
   rmSync(root, { recursive: true, force: true });
 });
@@ -135,6 +139,45 @@ describe("a minified bundle's functions", () => {
       "Cart.checkout",
       expect.stringMatching(/^(Object\.)?shipOrder$/),
     ]);
+  });
+
+  it("name an error's frames from the CallSites kept as its stack was written: a callback, anonymous or a const's", () => {
+    keepErrorSites();
+    const errors = [
+      app.eachOrder([1], () => undefined)[0] as Error,
+      app.eachParcel([1], () => undefined)[0] as Error,
+      app.placeOrder(5),
+    ];
+
+    expect(errors.map((error) => errorSites(error, error.stack)?.[0]?.enclosing)).toEqual([
+      expect.any(Object),
+      expect.any(Object),
+      expect.any(Object),
+    ]);
+
+    expect(
+      errors.map((error) => {
+        const innermost = frames(error.stack, root, undefined, error).at(-1);
+        return `${innermost?.filename}:${innermost?.lineno} in ${innermost?.function}`;
+      }),
+    ).toEqual([
+      `${line("anonymous")} in <anonymous>`,
+      `${line("onParcel")} in onParcel`,
+      expect.stringMatching(
+        new RegExp(`^src/names\\.ts:${Number(line("placeOrder").split(":")[1]) + 1} in placeOrder$`),
+      ),
+    ]);
+  });
+
+  it("name where a call was made from the stack's CallSites, exactly: a callback, anonymous or a const's", () => {
+    const origins: (string | null)[] = [];
+    const probe = () => {
+      origins.push(madeAt(root).origin);
+    };
+    app.eachOrder([1], probe);
+    app.eachParcel([1], probe);
+
+    expect(origins).toEqual([`${line("probe anonymous")} in <anonymous>`, `${line("probe onParcel")} in onParcel`]);
   });
 
   it("name a profile's frames, by where each function starts, as the source does", () => {
