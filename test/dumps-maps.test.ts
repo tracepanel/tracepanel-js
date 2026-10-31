@@ -43,12 +43,17 @@ function bundle(entry: string, out: string, sourcemap: "linked" | "inline" | "ex
   });
 }
 
-/** A V8 stack of a console.log() call at the code that ran: the place of the first match of `call` in `file`. */
-function stackAt(file: string, call: RegExp, fn: string): string {
+/**
+ * A V8 stack of a console.log() call at the code that ran: the place of the first match of `call` in `file`, in the
+ * function the code that ran names there (the minifier's name).
+ */
+function stackAt(file: string, call: RegExp): string {
   const lines = readFileSync(file, "utf8").split("\n");
   const line = lines.findIndex((text) => call.test(text));
-  const column = (lines[line] ?? "").search(call) + "console.".length + 1;
-  return `Error\n    at ${fn} (${file}:${line + 1}:${column})\n    at handle (${join(root, "server.js")}:1:1)`;
+  const at = (lines[line] ?? "").search(call);
+  const before = [...lines.slice(0, line), (lines[line] ?? "").slice(0, at)].join("\n");
+  const fn = [...before.matchAll(/function ([\w$]+)\(/g)].at(-1)?.[1] ?? "<anonymous>";
+  return `Error\n    at ${fn} (${file}:${line + 1}:${at + "console.".length + 1})\n    at handle (${join(root, "server.js")}:1:1)`;
 }
 
 /** The dump of `console.log(...args)` called where `stack` says. */
@@ -83,22 +88,22 @@ describe("a dump in bundled code", () => {
 
     expect(readFileSync(out, "utf8")).toContain("//# sourceMappingURL=linked.js.map");
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n"))).toEqual({
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER))).toEqual({
       exprs: [
         ["order", "{\n  id: 7\n}"],
         ["order.items.length", "2"],
       ],
-      origin: origin("log", "n"),
+      origin: origin("log", "inspectOrder"),
       message: "{ id: 7 } 2",
     });
 
-    expect(dumped(["user:", { name: "ann" }, "s3cr3t"], stackAt(out, SECRET, "r"))).toEqual({
+    expect(dumped(["user:", { name: "ann" }, "s3cr3t"], stackAt(out, SECRET))).toEqual({
       exprs: [
         [null, "'user:'"],
         ["user", "{\n  name: 'ann'\n}"],
         ["apiToken", "********"],
       ],
-      origin: origin("secret", "r"),
+      origin: origin("secret", "withSecret"),
       message: "user: { name: 'ann' } ********",
     });
   });
@@ -110,12 +115,12 @@ describe("a dump in bundled code", () => {
 
     expect(code.length - code.indexOf("//# sourceMappingURL=data:")).toBeGreaterThan(2000);
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n"))).toEqual({
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER))).toEqual({
       exprs: [
         ["order", "{\n  id: 7\n}"],
         ["order.items.length", "2"],
       ],
-      origin: origin("log", "n"),
+      origin: origin("log", "inspectOrder"),
       message: "{ id: 7 } 2",
     });
   });
@@ -126,7 +131,7 @@ describe("a dump in bundled code", () => {
 
     expect(readFileSync(out, "utf8")).not.toContain("sourceMappingURL");
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n")).exprs).toEqual([
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER)).exprs).toEqual([
       ["order", "{\n  id: 7\n}"],
       ["order.items.length", "2"],
     ]);
@@ -139,12 +144,12 @@ describe("a dump in bundled code", () => {
     bundle(join(root, "gone", "debug.ts"), out, "linked");
     rmSync(join(root, "gone"), { recursive: true });
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n"))).toEqual({
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER))).toEqual({
       exprs: [
         ["order", "{\n  id: 7\n}"],
         ["order.items.length", "2"],
       ],
-      origin: origin("log", "n").replace("src/", "gone/"),
+      origin: origin("log", "inspectOrder").replace("src/", "gone/"),
       message: "{ id: 7 } 2",
     });
   });
@@ -157,7 +162,7 @@ describe("a bundle rewritten under the same name", () => {
     writeFileSync(entry, readFileSync(SOURCE, "utf8"));
     bundle(entry, out, "linked");
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n")).exprs).toEqual([
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER)).exprs).toEqual([
       ["order", "{\n  id: 7\n}"],
       ["order.items.length", "2"],
     ]);
@@ -173,12 +178,12 @@ describe("a bundle rewritten under the same name", () => {
     utimesSync(out, later, later);
     utimesSync(`${out}.map`, later, later);
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n"))).toEqual({
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER))).toEqual({
       exprs: [
         ["basket", "{\n  id: 7\n}"],
         ["basket.items.length", "2"],
       ],
-      origin: `src/rewritten.ts:${edited.split("\n").findIndex((line) => line.includes("// log")) + 1} in n`,
+      origin: `src/rewritten.ts:${edited.split("\n").findIndex((line) => line.includes("// log")) + 1} in inspectOrder`,
       message: "{ id: 7 } 2",
     });
   });
@@ -201,16 +206,14 @@ describe("a dump in transpiled code", () => {
 
     expect(readFileSync(`${out}.map`, "utf8")).not.toContain("sourcesContent");
 
-    expect(dumped([{ id: 7 }, 2], stackAt(out, /console\.log\(order, order\.items\.length\)/, "inspectOrder"))).toEqual(
-      {
-        exprs: [
-          ["order", "{\n  id: 7\n}"],
-          ["order.items.length", "2"],
-        ],
-        origin: origin("log", "inspectOrder"),
-        message: "{ id: 7 } 2",
-      },
-    );
+    expect(dumped([{ id: 7 }, 2], stackAt(out, /console\.log\(order, order\.items\.length\)/))).toEqual({
+      exprs: [
+        ["order", "{\n  id: 7\n}"],
+        ["order.items.length", "2"],
+      ],
+      origin: origin("log", "inspectOrder"),
+      message: "{ id: 7 } 2",
+    });
   });
 
   it("reads a source again once it changed", () => {
