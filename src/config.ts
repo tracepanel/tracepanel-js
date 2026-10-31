@@ -61,9 +61,18 @@ export interface Thresholds {
   queue_wait_ms: number;
   /** A SELECT without a LIMIT that returned this many rows. */
   large_result_rows: number;
+  /**
+   * A slow query for one database, by its `db.system` (`{ snowflake: 3000 }`): it wins over `slow_sql_ms` and the
+   * agent's warehouse defaults. From TRACEPANEL_SLOW_SQL_MS=100,snowflake=3000.
+   */
+  slow_sql_ms_by_db?: Record<string, number>;
+  /** A long transaction for one database, by its `db.system`: from TRACEPANEL_LONG_TRANSACTION_MS=500,snowflake=20000. */
+  long_transaction_ms_by_db?: Record<string, number>;
 }
 
-const THRESHOLDS: Record<keyof Thresholds, [string, number]> = {
+type Limit = Exclude<keyof Thresholds, "slow_sql_ms_by_db" | "long_transaction_ms_by_db">;
+
+const THRESHOLDS: Record<Limit, [string, number]> = {
   n_plus_one: ["TRACEPANEL_N_PLUS_ONE_THRESHOLD", 3],
   n_plus_one_min_ms: ["TRACEPANEL_N_PLUS_ONE_MIN_MS", 5],
   slow_sql_ms: ["TRACEPANEL_SLOW_SQL_MS", 100],
@@ -73,11 +82,36 @@ const THRESHOLDS: Record<keyof Thresholds, [string, number]> = {
   large_result_rows: ["TRACEPANEL_LARGE_RESULT_ROWS", 1000],
 };
 
+/** The limits that may be set per database too, and the field of their map. */
+const BY_DB: Partial<Record<Limit, "slow_sql_ms_by_db" | "long_transaction_ms_by_db">> = {
+  slow_sql_ms: "slow_sql_ms_by_db",
+  long_transaction_ms: "long_transaction_ms_by_db",
+};
+
+/**
+ * The limits from the environment, the agent's defaults for the rest. TRACEPANEL_SLOW_SQL_MS and
+ * TRACEPANEL_LONG_TRANSACTION_MS take one per database too, by its `db.system`: `100,snowflake=3000` holds every
+ * database to 100 ms but Snowflake, to 3 s. A part that isn't a number is left out.
+ */
 function thresholds(env: NodeJS.ProcessEnv): Thresholds {
   const found = {} as Thresholds;
-  for (const [name, [variable, fallback]] of Object.entries(THRESHOLDS) as [keyof Thresholds, [string, number]][]) {
-    const value = Number(env[variable]);
-    found[name] = Number.isFinite(value) && env[variable] !== undefined && env[variable] !== "" ? value : fallback;
+  for (const [name, [variable, fallback]] of Object.entries(THRESHOLDS) as [Limit, [string, number]][]) {
+    found[name] = fallback;
+    for (const part of (env[variable] ?? "").split(",")) {
+      const [left, right] = part.split("=", 2).map((piece) => piece.trim());
+      const value = right === undefined ? left : right;
+      if (value === undefined || value === "") continue;
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < 0) continue;
+      if (right === undefined) {
+        found[name] = number;
+        continue;
+      }
+      const field = BY_DB[name];
+      const system = left?.toLowerCase();
+      if (field === undefined || !system) continue;
+      found[field] = { ...found[field], [system]: number };
+    }
   }
   return found;
 }

@@ -464,6 +464,13 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_PROFILE_ENABLED` | on | `0` profiles nothing, and the console offers no Profile toggle |
 | `TRACEPANEL_PROFILE_INTERVAL_MS` | `1` | how often a profiled trace is sampled |
 
+`TRACEPANEL_SLOW_SQL_MS` and `TRACEPANEL_LONG_TRANSACTION_MS` take a limit
+per database too, by its `db.system`: `TRACEPANEL_SLOW_SQL_MS=100,snowflake=3000`
+holds every database to 100 ms but Snowflake, to 3 s. Without one, the
+agent holds an analytical warehouse (Snowflake, BigQuery, Databricks,
+Redshift, ClickHouse) to 2 s per query and 10 s per transaction. The
+names are OpenTelemetry's: `postgresql`, `mysql`, `sqlite`, `mongodb`.
+
 ## Command line
 
 | Command | What it does |
