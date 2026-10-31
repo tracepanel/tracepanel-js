@@ -6,12 +6,13 @@
 // body parser's `req.body`, or the bytes the app's own reads took from the request's stream (body.ts). Tracepanel
 // never reads a request's stream for the app.
 
+import { MASK, masks, sensitive as secretName } from "./masking.js";
 import type { Attrs } from "./model.js";
+
+export { MASK };
 
 /** How much of a body is kept, in characters. */
 export const MAX_BODY = 16_384;
-export const MASK = "********";
-const SENSITIVE = /pass(word|wd)?|secret|token|api_?key|auth|cookie|session|csrf|signature|private/i;
 /** A response's cookies are a session's keys, whatever their name. */
 const ALWAYS_MASKED = new Set(["set-cookie"]);
 /** A form as people read it: encoded, but its spaces, masks and file notes as they are. */
@@ -24,9 +25,9 @@ export function key(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9_]/g, "_") || "_";
 }
 
-/** Whether a secret goes under the name: x-api-key, csrftoken, sessionid, password. */
+/** Whether a secret goes under the name, word by word (masking.ts): x-api-key, csrftoken, sessionid, authToken. */
 export function sensitive(name: string): boolean {
-  return SENSITIVE.test(name.replaceAll("-", "_"));
+  return secretName(name);
 }
 
 /** A header's value as one string: several values joined, as Node joins them. */
@@ -42,7 +43,7 @@ function headers(prefix: string, entries: Iterable<[string, unknown]>): Attrs {
     if (!value) continue;
     const lowered = name.toLowerCase();
     const attr = `${prefix}${key(lowered)}`;
-    if (ALWAYS_MASKED.has(lowered) || sensitive(lowered)) found[attr] = MASK;
+    if (ALWAYS_MASKED.has(lowered) || sensitive(name)) found[attr] = MASK;
     else found[attr] = attr in found ? `${found[attr]}, ${value}` : value;
   }
   return found;
@@ -128,7 +129,7 @@ export function masked(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(masked);
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([name, item]) => [name, sensitive(name) ? MASK : masked(item)]),
+      Object.entries(value).map(([name, item]) => [name, masks(name, item) ? MASK : masked(item)]),
     );
   }
   return value;

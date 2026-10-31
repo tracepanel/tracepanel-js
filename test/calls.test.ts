@@ -5,7 +5,7 @@ import { exposedHeaders } from "../src/widget.js";
 describe("calls to other systems", () => {
   it("keeps no credentials or secret values in a URL", () => {
     expect(safeUrl("https://ann:hunter2@api.example.com/v1/users?token=abc&page=2")).toBe(
-      "https://api.example.com/v1/users?token=***&page=2",
+      "https://api.example.com/v1/users?token=********&page=2",
     );
   });
 
@@ -20,7 +20,7 @@ describe("calls to other systems", () => {
       name: "GET 127.0.0.1/ping",
       attrs: {
         "http.request.method": "GET",
-        "url.full": "http://127.0.0.1:8062/ping?api_key=***",
+        "url.full": "http://127.0.0.1:8062/ping?api_key=********",
         "url.scheme": "http",
         "server.address": "127.0.0.1",
         "server.port": 8062,

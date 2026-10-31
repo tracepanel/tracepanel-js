@@ -5,9 +5,9 @@
 import { format, inspect } from "node:util";
 import { InstrumentationBase, InstrumentationNodeModuleDefinition } from "@opentelemetry/instrumentation";
 import { quietly } from "./console.js";
+import { MASK, masks } from "./masking.js";
 import type { Attrs, Log } from "./model.js";
 import type { TracepanelProcessor } from "./processor.js";
-import { MASK, sensitive } from "./request.js";
 
 type LogRecord = Omit<Log, "span_id">;
 type Fields = { [key: string]: unknown };
@@ -26,7 +26,7 @@ export function extraAttrs(fields: Fields, skip: ReadonlySet<string> = new Set()
         .replace(/[^a-z0-9_]+/g, "_")
         .replace(/^_+|_+$/g, "") || "value"
     }`;
-    if (sensitive(name)) attrs[key] = MASK;
+    if (masks(name, value)) attrs[key] = MASK;
     else if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean")
       attrs[key] = value;
     else attrs[key] = inspect(value, { depth: 2, breakLength: Number.POSITIVE_INFINITY, maxArrayLength: 20 });

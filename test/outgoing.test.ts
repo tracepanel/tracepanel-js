@@ -63,7 +63,7 @@ describe("outgoing calls on Bun", () => {
     expect(span?.name).toBe("POST 127.0.0.1/rates");
     expect(span?.attrs).toEqual({
       "http.request.method": "POST",
-      "url.full": `${base}/rates?api_key=***`,
+      "url.full": `${base}/rates?api_key=********`,
       "url.scheme": "http",
       "server.address": "127.0.0.1",
       "server.port": Number(new URL(base).port),

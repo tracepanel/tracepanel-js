@@ -64,6 +64,19 @@
   secret inside a value (`{ password: '********' }`), not only a variable
   whose name does, and show a proxy without running its traps.
 
+### Changed
+
+- A name that holds a secret is read word by word, as the Python and Java
+  SDKs read it: split at `_ - . [ ]` and where camelCase turns, a
+  secret's word must be whole. `authToken`, `AUTH_HEADER`, `x-api-key`,
+  `csrftoken` and `sessionid` are masked; `author`, `tokenizer`,
+  `max_tokens`, `password_length` and `is_private` no longer are, and
+  `tokens` holding numbers (a model's counts) is shown. The same rule
+  masks a request's headers, query, cookies and body, a dump's arguments
+  and the keys inside them, an error's locals, a log record's fields and
+  an outgoing call's query, which also masks an API's `key`, `sig`, `pwd`
+  and `credential` as whole words, now as `********`.
+
 ## 0.9.2 (2026-10-30)
 
 Needs `@tracepanel/agent` 0.9.2 (installed with it), whose console reads a
