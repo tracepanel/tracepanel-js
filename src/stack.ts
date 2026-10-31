@@ -1,7 +1,7 @@
 // The app's own code in a V8 stack: where a query was made (code.origin), or the library code that asked for one
 // none of the app's code made (code.caller); and an error's frames with their source.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import nodeModule, { type SourceMap } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,12 @@ export function asyncFrames(stack: string | undefined): boolean[] {
 const BUNDLES = [`${sep}.next${sep}`, `${sep}.nuxt${sep}`, `${sep}.output${sep}`];
 const MAPPING_URL = /\/\/[#@] sourceMappingURL=(\S+)\s*$/;
 
+/** The source map a file's last sourceMappingURL comment names (an inline one may be longer than the code). */
+function mappingUrl(text: string): string | undefined {
+  const at = Math.max(text.lastIndexOf("//# sourceMappingURL="), text.lastIndexOf("//@ sourceMappingURL="));
+  return at < 0 ? undefined : MAPPING_URL.exec(text.slice(at))?.[1];
+}
+
 /** A file's source map and where it is (its sources are relative to it), or null: cached by the file's path. */
 const maps = new Map<string, { map: SourceMap; at: string } | null>();
 
@@ -67,31 +73,73 @@ function sourceMap(file: string): { map: SourceMap; at: string } | null {
   if (maps.has(file)) return maps.get(file) ?? null;
   let found: { map: SourceMap; at: string } | null = null;
   try {
-    // The map Node loaded with the file (--enable-source-maps), else the one its sourceMappingURL names.
+    // The map Node loaded with the file (--enable-source-maps), else the one its sourceMappingURL names (inline, or
+    // a file), else the .map beside it.
     const loaded = nodeModule.findSourceMap?.(file);
     if (loaded) {
       found = { map: loaded, at: file };
-    } else {
-      const text = readFileSync(file, "utf8");
-      const url = MAPPING_URL.exec(text.slice(-2000))?.[1];
-      if (url && typeof nodeModule.SourceMap === "function") {
-        let payload: string;
-        let at = file;
-        if (url.startsWith("data:")) {
-          const [meta, data = ""] = url.split(",", 2);
-          payload = meta?.endsWith(";base64") ? Buffer.from(data, "base64").toString("utf8") : decodeURIComponent(data);
-        } else {
-          at = url.startsWith("file://") ? fileURLToPath(url) : resolve(dirname(file), decodeURIComponent(url));
-          payload = readFileSync(at, "utf8");
-        }
-        found = { map: new nodeModule.SourceMap(JSON.parse(payload)), at };
+    } else if (typeof nodeModule.SourceMap === "function") {
+      const url = mappingUrl(readFileSync(file, "utf8"));
+      let payload: string | undefined;
+      let at = file;
+      if (url?.startsWith("data:")) {
+        const [meta, data = ""] = url.split(",", 2);
+        payload = meta?.endsWith(";base64") ? Buffer.from(data, "base64").toString("utf8") : decodeURIComponent(data);
+      } else if (url) {
+        at = url.startsWith("file://") ? fileURLToPath(url) : resolve(dirname(file), decodeURIComponent(url));
+        payload = readFileSync(at, "utf8");
+      } else if (existsSync(`${file}.map`)) {
+        at = `${file}.map`;
+        payload = readFileSync(at, "utf8");
       }
+      if (payload !== undefined) found = { map: new nodeModule.SourceMap(JSON.parse(payload)), at };
     }
   } catch {
     // No map, or one that can't be read: the frame stays as it is.
   }
   maps.set(file, found);
   return found;
+}
+
+/**
+ * The text of the app's sources as their source maps hold it (sourcesContent), by path: what ran, though the file
+ * changed since or isn't on disk (a bundle's virtual module).
+ */
+const contents = new Map<string, string>();
+
+/** A source file's text as a source map that led to it holds it, when one did and holds it. */
+export function mappedSource(file: string): string | undefined {
+  return contents.get(file);
+}
+
+interface MapPayload {
+  sources?: string[];
+  sourcesContent?: (string | null)[];
+  sourceRoot?: string;
+  sections?: { map: MapPayload }[];
+}
+
+/** The maps and sources keepContent() looked through once, as `map\0source`: a bundle's map has thousands. */
+const looked = new Set<string>();
+
+/** Keep the text the map holds for the source at `path`, read from its sources (an index map's sections' too). */
+function keepContent(payload: MapPayload, mapFile: string, path: string): void {
+  const key = `${mapFile}\0${path}`;
+  if (contents.has(path) || looked.has(key)) return;
+  looked.add(key);
+  findContent(payload, mapFile, path);
+}
+
+function findContent(payload: MapPayload, mapFile: string, path: string): void {
+  const sourceRoot = String(payload.sourceRoot ?? "");
+  for (const [index, source] of (payload.sources ?? []).entries()) {
+    const content = payload.sourcesContent?.[index];
+    if (typeof content === "string" && sourcePath(source, mapFile, sourceRoot) === path) {
+      contents.set(path, content);
+      return;
+    }
+  }
+  for (const section of payload.sections ?? []) findContent(section.map, mapFile, path);
 }
 
 /** A source map's name for a source, as a path: a file URL, Turbopack's [project]/, or relative to the map. */
@@ -122,13 +170,10 @@ function original(frame: StackFrame, column: number): StackFrame {
   try {
     const entry = found.map.findEntry(frame.line - 1, Math.max(column - 1, 0));
     if (!("originalSource" in entry) || !entry.originalSource) return frame;
-    const sourceRoot = String((found.map.payload as { sourceRoot?: string }).sourceRoot ?? "");
-    return {
-      function: frame.function,
-      file: sourcePath(entry.originalSource, found.at, sourceRoot),
-      line: entry.originalLine + 1,
-      column: entry.originalColumn + 1,
-    };
+    const payload = found.map.payload as MapPayload;
+    const file = sourcePath(entry.originalSource, found.at, String(payload.sourceRoot ?? ""));
+    keepContent(payload, found.at, file);
+    return { function: frame.function, file, line: entry.originalLine + 1, column: entry.originalColumn + 1 };
   } catch {
     return frame;
   }

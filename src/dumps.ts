@@ -11,7 +11,7 @@ import { Writable } from "node:stream";
 import { format, inspect } from "node:util";
 import type { Log } from "./model.js";
 import { MASK, sensitive } from "./request.js";
-import { inApp, originOf, ownFile, parseStack, type StackFrame } from "./stack.js";
+import { inApp, mappedSource, originOf, ownFile, parseStack, type StackFrame } from "./stack.js";
 
 /** How long an argument's text is at most, "… (truncated)" included. */
 export const MAX_REPR = 16_384;
@@ -153,15 +153,44 @@ function printed(method: string, args: readonly unknown[]): string {
   }
 }
 
+/** Source files read for the arguments' text, by path, as of their modification time: a dev server's edits read anew. */
+const sources = new Map<string, { mtimeMs: number; lines: string[] }>();
+/** A source map's text of a source, split into lines once. */
+const mappedLines = new Map<string, { text: string; lines: string[] }>();
+
 /**
- * The source text of each argument of the call at a frame, read from its file; null when the file can't be read or
- * the call's arguments can't be told apart (a spread, a call split oddly, a line a bundler made).
+ * A source file's lines: as the source map that led to it holds them (what ran, though the file isn't on disk or
+ * changed since), else read from the file; undefined for a file too big or that can't be read.
+ */
+function sourceLines(file: string): string[] | undefined {
+  const mapped = mappedSource(file);
+  if (mapped !== undefined) {
+    if (mapped.length > MAX_SOURCE) return undefined;
+    const split = mappedLines.get(file);
+    if (split?.text === mapped) return split.lines;
+    const lines = mapped.split("\n");
+    mappedLines.set(file, { text: mapped, lines });
+    return lines;
+  }
+  const { size, mtimeMs } = statSync(file);
+  if (size > MAX_SOURCE) return undefined;
+  const cached = sources.get(file);
+  if (cached?.mtimeMs === mtimeMs) return cached.lines;
+  const lines = readFileSync(file, "utf8").split("\n");
+  sources.set(file, { mtimeMs, lines });
+  return lines;
+}
+
+/**
+ * The source text of each argument of the call at a frame, read from its source (through its bundle's source map,
+ * see stack.ts); null when the source can't be read or the call's arguments can't be told apart (a spread, a call
+ * split oddly).
  */
 export function expressions(site: StackFrame, count: number): (string | null)[] | null {
   if (site.column === undefined || !Number.isFinite(site.column)) return null;
   try {
-    if (statSync(site.file).size > MAX_SOURCE) return null;
-    const lines = readFileSync(site.file, "utf8").split("\n");
+    const lines = sourceLines(site.file);
+    if (!lines) return null;
     if (site.line < 1 || site.line > lines.length) return null;
     const text = lines
       .slice(site.line - 1)

@@ -165,6 +165,7 @@
     "better-sqlite3": "^12.11.1",
     "bullmq": "^6.3.17",
     "cookie-session": "^2.1.1",
+    "esbuild": "^0.28.2",
     "express": "^5.3.0",
     "express-session": "^1.19.0",
     "fastify": "^5.12.7",
