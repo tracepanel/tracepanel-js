@@ -146,6 +146,6 @@ export function start(options: Options = {}): Runtime | undefined {
   traceLlmFetch();
   // Bun's stacks have no async frames: an ORM's query takes the app's line as the app calls the ORM.
   if (bun) traceBunQueries(tracepanel.config.root);
-  captureConsole(tracepanel.processor);
+  captureConsole(tracepanel.processor, tracepanel.config);
   return tracepanel;
 }

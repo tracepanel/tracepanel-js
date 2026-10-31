@@ -27,7 +27,7 @@ export default function tracepanelPlugin(nitroApp: NitroApp): void {
   if (!tracepanel) return;
   headersOnResponses(tracepanel, "Nuxt");
   // Nuxt's dev server replaced console with its own logger after --import wrapped it.
-  captureConsole(tracepanel.processor);
+  captureConsole(tracepanel.processor, tracepanel.config);
   // h3 answers a thrown error with a 500 and records it nowhere: the request's trace gets it here.
   // createError({ statusCode: 404 }) and the like are answers, not errors.
   nitroApp.hooks.hook("error", (error) => {

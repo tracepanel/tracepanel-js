@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Dumps: a developer's own debug output, recorded on the current span and
+  always shown in the call tree, as the Python SDK records devtools'
+  `debug()`. `console.dir()`, `console.table()`, and `console.log()`,
+  `.debug()` or `.info()` with an argument that isn't a primitive (an
+  object, an array, a Map, a function; not an Error) are dumps instead of
+  log lines: each argument's source text, read from the call's line, its
+  value as Node prints it (16 KiB at most), its type and length. An
+  argument whose source names a secret (`apiToken`, `password`) is masked.
+  Only the app's own calls inside a trace are dumps; console prints as
+  before. `TRACEPANEL_DUMPS=0` turns them off.
+
 ## 0.9.2 (2026-10-30)
 
 Needs `@tracepanel/agent` 0.9.2 (installed with it), whose console reads a

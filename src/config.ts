@@ -34,6 +34,11 @@ export interface Config {
    * "memory" in the header or cookie: TRACEPANEL_PROFILE_MEMORY=1.
    */
   profileMemory: boolean;
+  /**
+   * Record a developer's own debug output (console.dir(), console.table(), console.log() of an object) as a dump
+   * the call tree always shows: TRACEPANEL_DUMPS=0 leaves console as before (console.log() an ordinary log line).
+   */
+  dumps: boolean;
   /** Put widget.min.js into the app's HTML pages: TRACEPANEL_WIDGET=0 leaves them as they are (the tests' pages). */
   widget: boolean;
   /** Whether profiling is possible at all: TRACEPANEL_PROFILE_ENABLED=0, and nothing profiles. */
@@ -117,6 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captureRequest: on(env.TRACEPANEL_CAPTURE_REQUEST),
     captureLocals: on(env.TRACEPANEL_CAPTURE_LOCALS),
     widget: on(env.TRACEPANEL_WIDGET),
+    dumps: on(env.TRACEPANEL_DUMPS),
     profile: onlyIf(env.TRACEPANEL_PROFILE),
     profileMemory: onlyIf(env.TRACEPANEL_PROFILE_MEMORY),
     profileEnabled: on(env.TRACEPANEL_PROFILE_ENABLED),

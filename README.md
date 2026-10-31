@@ -29,7 +29,7 @@ It runs while you develop, and everything stays on your machine.
 | **AWS** | The AWS SDK's v3 clients (`@aws-sdk/client-*`): S3 as storage calls, DynamoDB commands with their N+1 and duplicates, SQS and SNS messages, and every other service's calls, with their errors and retries. |
 | **LLMs** | OpenAI's and Anthropic's SDKs, and the AI SDK's OpenAI and Anthropic providers: each call's model, tokens, cost, time to the first chunk of a stream, and errors. |
 | **Background jobs** | BullMQ: each job a worker runs is a task, each job the app adds a step, and the jobs in flight are listed live. |
-| **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. |
+| **Logs** | `console`, pino, winston and Nest's `Logger`, each line on the request or job that wrote it. `console.dir()`, `console.table()` and `console.log()` of an object are dumps, always shown in the call tree with each argument's source text. |
 | **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |
 | **Profiling** | Where a request's CPU time goes, and its memory and garbage collections when you ask for them, on Node. |
 | **Tests** | Vitest 4.1 and later: a test fails when it makes an N+1 or duplicate queries. |
@@ -338,6 +338,8 @@ the line that ran it and the fix:
 - Outgoing HTTP calls from `fetch()` and `node:http` clients such as axios.
 - BullMQ jobs as tasks, and the jobs in flight.
 - Logs from `console`, pino, winston and Nest's `Logger`, with their fields.
+- Dumps: `console.dir()`, `console.table()` and `console.log()` of an
+  object, in the call tree with each argument's source text and value.
 - Errors thrown in a handler, with your frames, their source and local
   variables.
 - Where a request's CPU time and memory go, when you ask for a profile, on
@@ -456,6 +458,7 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_WIDGET` | on (off in tests) | `0` leaves the app's HTML pages without the widget's script |
 | `TRACEPANEL_CAPTURE_REQUEST` | on | `0` stops keeping each request's headers, query, cookies and body |
 | `TRACEPANEL_CAPTURE_LOCALS` | on | `0` stops reading an error's local variables |
+| `TRACEPANEL_DUMPS` | on | `0` records `console.log()` of an object as a log line, `console.dir()` and `console.table()` not at all |
 | `TRACEPANEL_PROFILE` | off | `1` profiles every trace, not only a request that asks |
 | `TRACEPANEL_PROFILE_MEMORY` | off | `1` profiles every profiled trace's memory too |
 | `TRACEPANEL_PROFILE_ENABLED` | on | `0` profiles nothing, and the console offers no Profile toggle |

@@ -24,6 +24,8 @@ export interface StackFrame {
   function: string;
   file: string;
   line: number;
+  /** 1-based, where the stack says it. */
+  column?: number;
 }
 
 /**
@@ -37,7 +39,7 @@ export function parseStack(stack: string | undefined, mapped = true): StackFrame
     if (!match) continue;
     const [, fn, location, lineno, column] = match;
     const file = location?.startsWith("file://") ? fileURLToPath(location) : (location ?? "");
-    const frame = { function: fn ?? "<anonymous>", file, line: Number(lineno) };
+    const frame = { function: fn ?? "<anonymous>", file, line: Number(lineno), column: Number(column) };
     frames.push(mapped ? original(frame, Number(column)) : frame);
   }
   return frames;
@@ -125,6 +127,7 @@ function original(frame: StackFrame, column: number): StackFrame {
       function: frame.function,
       file: sourcePath(entry.originalSource, found.at, sourceRoot),
       line: entry.originalLine + 1,
+      column: entry.originalColumn + 1,
     };
   } catch {
     return frame;
@@ -237,7 +240,7 @@ export function madeAt(root: string): { origin: string | null; caller: string | 
   const orm = ormFrame ? ormOf(ormFrame.file) : null;
   const own = stack.find((frame) => inApp(frame.file, root));
   if (own) {
-    return { origin: `${relative(root, own.file)}:${own.line} in ${shortName(own.function)}`, caller: null, orm };
+    return { origin: originOf(own, root), caller: null, orm };
   }
   const asked = stack.find((frame) => asks(frame.file, root));
   return {
@@ -251,6 +254,11 @@ export function madeAt(root: string): { origin: string | null; caller: string | 
 function ormOf(file: string): string | null {
   const name = packageOf(file);
   return name !== null && Object.hasOwn(ORMS, name) ? (ORMS[name] ?? null) : null;
+}
+
+/** `file:line in function` of a frame of the app's own code, the file relative to the project. */
+export function originOf(frame: StackFrame, root: string): string {
+  return `${relative(root, frame.file)}:${frame.line} in ${shortName(frame.function)}`;
 }
 
 function shortName(fn: string): string {
