@@ -26,8 +26,10 @@
   `cookie` (the panel's Profile toggle), `parent` (the header on a call
   from another app's profiled trace, or the browser's, with a
   `traceparent`), or `code` (a root span the app marked with
-  `tracepanel.profile` itself). A request that asks while the setting is
-  on says how it asked.
+  `tracepanel.profile` itself). When the setting would profile the trace
+  anyway, the reason is `setting`; otherwise it is the first ask that
+  profiled the trace, and a later one doesn't change it, as in the Python
+  SDK.
 - Dumps: a developer's own debug output, recorded on the current span and
   always shown in the call tree, as the Python SDK records devtools'
   `debug()`. `console.dir()`, `console.table()`, and `console.log()`,

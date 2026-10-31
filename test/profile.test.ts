@@ -169,7 +169,7 @@ describe("a trace's profile", () => {
     expect(sampled(await always.end(every, "/every")).crunchRates).toBeGreaterThan(0);
   });
 
-  it("says why the trace is profiled in profile.reason: the request's ask, the app's own code, or the setting", async () => {
+  it("says why the trace is profiled in profile.reason: the setting when it profiles every trace, else the first ask", async () => {
     const { start, end } = app();
     const fromHeader = start("/header", "1", "header");
     busy(5);
@@ -186,18 +186,19 @@ describe("a trace's profile", () => {
     const inNext = context.with(context.active().setValue(ASKED, "1").setValue(REASON, "cookie"), () => start("/next"));
     busy(5);
     const next = await end(inNext, "/next");
+    // The app's code marked the root span, in a context whose request asked with its header: the code asked first.
+    const codeFirst = context.with(context.active().setValue(ASKED, "1").setValue(REASON, "header"), () =>
+      start("/code-first", true),
+    );
+    busy(5);
+    const codeThenHeader = await end(codeFirst, "/code-first");
     const plain = start("/plain");
     busy(5);
     const unprofiled = await end(plain, "/plain");
 
-    expect([header, cookie, parent, code, next, unprofiled].map((done) => done.attrs["profile.reason"])).toEqual([
-      "header",
-      "cookie",
-      "parent",
-      "code",
-      "cookie",
-      undefined,
-    ]);
+    expect(
+      [header, cookie, parent, code, next, codeThenHeader, unprofiled].map((done) => done.attrs["profile.reason"]),
+    ).toEqual(["header", "cookie", "parent", "code", "cookie", "code", undefined]);
 
     const always = app({ TRACEPANEL_PROFILE: "1" });
     const every = always.start("/every");
@@ -208,7 +209,7 @@ describe("a trace's profile", () => {
     expect([
       (await always.end(every, "/every")).attrs["profile.reason"],
       (await always.end(asked, "/asked")).attrs["profile.reason"],
-    ]).toEqual(["setting", "header"]);
+    ]).toEqual(["setting", "setting"]);
   });
 
   it("leaves out what was sampled while another trace ran too, and counts it", async () => {

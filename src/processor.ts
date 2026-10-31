@@ -254,9 +254,10 @@ export class TracepanelProcessor implements SpanProcessor {
       const mode = this.profiler ? wanted(this.config, asked) : undefined;
       if (mode) {
         building.recording = this.profiler?.start(building, mode === "memory");
-        // Why: how the request asked (a root span the app's code marked itself says nothing: the code), else the setting.
+        // Why: the setting when it profiles every trace anyway, else how the request asked (a root span the app's code
+        // marked itself says nothing: the code). A later ask (profile()) keeps it.
         const how = fromSpan ? reasonOf(rootAttrs[REASON_ATTRIBUTE]) : reasonOf(parentContext.getValue(REASON));
-        building.trace.attrs[PROFILE_REASON] = asked ? (how ?? "code") : "setting";
+        building.trace.attrs[PROFILE_REASON] = this.config.profile ? "setting" : (how ?? "code");
       }
       // "memory" goes on as asked, though this runtime may profile the time only: the next app may count it.
       if (mode && asked) building.asked = asked;
