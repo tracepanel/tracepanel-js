@@ -24,7 +24,20 @@ import {
   type Span,
   type Trace,
 } from "./model.js";
-import { ASKED, type Asked, ATTRIBUTE, asking, available, Profiler, type Recording, wanted } from "./profile.js";
+import {
+  ASKED,
+  type Asked,
+  ATTRIBUTE,
+  asking,
+  available,
+  PROFILE_REASON,
+  Profiler,
+  REASON,
+  REASON_ATTRIBUTE,
+  type Recording,
+  reasonOf,
+  wanted,
+} from "./profile.js";
 import { QUERY_ORIGIN, type QueryOrigin } from "./queries.js";
 import { fingerprint, spanName, statement } from "./sql.js";
 import { frames, madeAt } from "./stack.js";
@@ -236,9 +249,15 @@ export class TracepanelProcessor implements SpanProcessor {
       this.profiler?.enter(building);
       // The request asked for it: its root span says so (Node's HTTP server, Bun.serve), or the context the framework
       // started it in (Next.js).
-      const asked = asking(rootAttrs[ATTRIBUTE]) ?? asking(parentContext.getValue(ASKED));
+      const fromSpan = asking(rootAttrs[ATTRIBUTE]);
+      const asked = fromSpan ?? asking(parentContext.getValue(ASKED));
       const mode = this.profiler ? wanted(this.config, asked) : undefined;
-      if (mode) building.recording = this.profiler?.start(building, mode === "memory");
+      if (mode) {
+        building.recording = this.profiler?.start(building, mode === "memory");
+        // Why: how the request asked (a root span the app's code marked itself says nothing: the code), else the setting.
+        const how = fromSpan ? reasonOf(rootAttrs[REASON_ATTRIBUTE]) : reasonOf(parentContext.getValue(REASON));
+        building.trace.attrs[PROFILE_REASON] = asked ? (how ?? "code") : "setting";
+      }
       // "memory" goes on as asked, though this runtime may profile the time only: the next app may count it.
       if (mode && asked) building.asked = asked;
     }

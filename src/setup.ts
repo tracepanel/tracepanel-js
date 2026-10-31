@@ -27,7 +27,7 @@ import { LlmInstrumentation, traceLlmFetch } from "./llm.js";
 import { PinoLogs, WinstonLogs } from "./loggers.js";
 import { NestLogs } from "./logs.js";
 import { traceBunCalls } from "./outgoing.js";
-import { ATTRIBUTE as PROFILE, requested } from "./profile.js";
+import { askAttributes, asks } from "./profile.js";
 import { profilePropagator } from "./propagation.js";
 import { traceBunQueries } from "./queries.js";
 import { type Runtime, runtime } from "./runtime.js";
@@ -132,8 +132,9 @@ export function start(options: Options = {}): Runtime | undefined {
         (request.method === "OPTIONS" && request.headers["access-control-request-method"] !== undefined),
       // What a request asks to be profiled for says so on its span, as it starts.
       startIncomingSpanHook: (request) => {
-        const asked = tracepanel.config.profileEnabled && "headers" in request ? requested(request.headers) : undefined;
-        return asked ? { [PROFILE]: asked } : {};
+        return askAttributes(
+          tracepanel.config.profileEnabled && "headers" in request ? asks(request.headers) : undefined,
+        );
       },
     }),
   ];
