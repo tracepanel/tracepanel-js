@@ -4,6 +4,11 @@
 
 ### Added
 
+- BullMQ jobs pass the profile ask on: a job added in a trace profiled
+  because its request asked (or its code called `profile()`) carries a
+  `tracepanel-profile` option (`1` or `memory`), and the worker profiles
+  the job's trace, its `profile.reason` `parent`, as Celery's tasks do in
+  the Python SDK. A job that sets the option itself keeps it.
 - `profile()` profiles the rest of the current trace from the app's code,
   `profile({ memory: true })` its memory too, as `tracepanel.profile()`
   does in the Python SDK. The trace's `profile.reason` is `code`, unless it

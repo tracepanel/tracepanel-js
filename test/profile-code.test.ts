@@ -64,6 +64,15 @@ app.get("/memory", async (_request, response) => {
   await fetch(`${serviceBase}/memory-call`);
   response.json({});
 });
+app.get("/upgrade", async (_request, response) => {
+  answered["/upgrade"] = profile();
+  crunchPrices(10);
+  await fetch(`${serviceBase}/time-call`);
+  answered["/upgrade"] &&= profile({ memory: true });
+  crunchPrices(20);
+  await fetch(`${serviceBase}/upgraded-call`);
+  response.json({});
+});
 app.get("/plain", async (_request, response) => {
   crunchPrices(5);
   await fetch(`${serviceBase}/plain-call`);
@@ -133,6 +142,36 @@ describe("profile()", () => {
     if (memoryProfiling()) expect(result.profile?.memory).toEqual(expect.objectContaining({ sites_at: "end" }));
 
     expect(asked["/memory-call"]).toBe("memory");
+  });
+
+  it("adds the memory to a trace profiled for its time already, and asks it of the later calls", async () => {
+    const result = await request("/upgrade");
+
+    expect(answered["/upgrade"]).toBe(true);
+    expect(result.attrs["profile.reason"]).toBe("code");
+    expect(result.profile).toEqual(expect.objectContaining({ samples: expect.any(Number) }));
+    if (memoryProfiling()) {
+      expect(result.profile?.memory).toEqual(
+        expect.objectContaining({ peak: expect.any(Number), net: expect.any(Number), sites_at: "end" }),
+      );
+    }
+
+    expect(asked).toMatchObject({ "/time-call": "1", "/upgraded-call": "memory" });
+  });
+
+  it("adds the memory to a trace the setting profiles, keeping its reason", async () => {
+    config.profile = true;
+    try {
+      const result = await request("/memory");
+
+      expect(answered["/memory"]).toBe(true);
+      expect(result.attrs["profile.reason"]).toBe("setting");
+      if (memoryProfiling()) expect(result.profile?.memory).toEqual(expect.objectContaining({ sites_at: "end" }));
+
+      expect(asked["/memory-call"]).toBe("memory");
+    } finally {
+      config.profile = false;
+    }
   });
 
   it("profiles the trace a trace() of the app's code makes", async () => {
