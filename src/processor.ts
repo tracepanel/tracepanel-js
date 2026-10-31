@@ -387,12 +387,34 @@ export class TracepanelProcessor implements SpanProcessor {
     return building ? { building, spanId: building.ids.get(context.spanId) ?? null } : undefined;
   }
 
-  /** The trace being built from an OTel span, while it is: a test's, its spans so far. */
+  /**
+   * Profiles the rest of the active trace, its memory too when `memory` (profile() in the app's code): the reason is
+   * the code's unless the trace is profiled already, and its calls to other apps ask for a profile from now on.
+   * Whether the trace is profiled; false outside a trace, or with profiling off.
+   */
+  profile(memory: boolean): boolean {
+    const building = this.current()?.building;
+    if (!building || !this.profiler) return false;
+    const asked: Asked = memory || building.asked === "memory" ? "memory" : "1";
+    if (building.recording) {
+      if (memory && this.config.profileEnabled) this.profiler.addMemory(building.recording);
+    } else {
+      const mode = wanted(this.config, asked);
+      if (!mode) return false;
+      building.recording = this.profiler.start(building, mode === "memory");
+      if (!building.recording) return false;
+      building.trace.attrs[PROFILE_REASON] ??= "code";
+    }
+    building.asked = asked;
+    return true;
+  }
+
   /** What the trace of this OTel span asked to be profiled for, when its request's ask profiles it. */
   askedBy(spanId: string): Asked | undefined {
     return this.owner.get(spanId)?.asked;
   }
 
+  /** The trace being built from an OTel span, while it is: a test's, its spans so far. */
   openTrace(spanId: string): Trace | undefined {
     return this.owner.get(spanId)?.trace;
   }

@@ -65,7 +65,7 @@ export function asking(value: unknown): Asked | undefined {
 /**
  * Why a trace is profiled: the `profile` setting, a request's X-Tracepanel-Profile header (a person's, or a tool's),
  * the panel's cookie, the header on a call from another app's profiled trace (it carries a traceparent too: a
- * backend's call, the browser's), or the app's own code (a root span it marks with tracepanel.profile).
+ * backend's call, the browser's), or the app's own code (profile(), or a root span it marks with tracepanel.profile).
  */
 export type Reason = "setting" | "header" | "cookie" | "parent" | "code";
 
@@ -201,6 +201,13 @@ export class Profiler {
     console.profile(recording.title);
     this.recordings.add(recording);
     return recording;
+  }
+
+  /** Profiles the memory of a trace profiled already, from now (profile({ memory: true }) in its code). */
+  addMemory(recording: Recording): void {
+    if (recording.heap || !this.recordings.has(recording) || !this.session || !memoryAvailable()) return;
+    this.heaps ??= new HeapSampler(this.session);
+    recording.heap = this.heaps.begin();
   }
 
   /** Ends a trace's profile, before it leaves: what was sampled while it alone ran. */
