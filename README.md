@@ -467,9 +467,12 @@ The trace says why it was profiled in `profile.reason`:
 - `code`: `profile()`, or a root span the app marked with the
   `tracepanel.profile` attribute.
 
-A trace profiled already keeps its reason. A request that asked for a
-profile (header, cookie, parent) asks the same of its calls and jobs; a
-trace only the setting profiles asks nothing of them.
+When `TRACEPANEL_PROFILE=1` would profile the trace anyway, the reason is
+`setting`, whatever asked too. Otherwise it is the first ask that profiled
+the trace, and a later one (`profile()` in a trace its request's header
+profiled) doesn't change it. A request that asked for a profile (header,
+cookie, parent) asks the same of its calls and jobs; a trace only the
+setting profiles asks nothing of them.
 
 ## Settings
 

@@ -15,7 +15,7 @@ import { profile, trace } from "../src/api.js";
 import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
-import { memoryProfiling } from "../src/profile.js";
+import { askAttributes, asks, memoryProfiling } from "../src/profile.js";
 import { profilePropagator } from "../src/propagation.js";
 import { crunchPrices } from "./app/shop.js";
 
@@ -34,7 +34,15 @@ new NodeTracerProvider({ spanProcessors: [processor] }).register({
   propagator: profilePropagator((spanId) => processor.askedBy(spanId)),
 });
 const unregister = registerInstrumentations({
-  instrumentations: [new HttpInstrumentation(), new UndiciInstrumentation()],
+  instrumentations: [
+    // What a request asks to be profiled for says so on its span, as register() marks it. The test's own fetch()
+    // sends a traceparent, which would make its header a parent's ask.
+    new HttpInstrumentation({
+      startIncomingSpanHook: (request) =>
+        askAttributes("headers" in request ? asks({ ...request.headers, traceparent: undefined }) : undefined),
+    }),
+    new UndiciInstrumentation(),
+  ],
 });
 // Loaded through require, node:http is patched: its server's prototype is the one ES modules import too.
 const http = createRequire(import.meta.url)("node:http") as typeof import("node:http");
@@ -73,6 +81,11 @@ app.get("/upgrade", async (_request, response) => {
   await fetch(`${serviceBase}/upgraded-call`);
   response.json({});
 });
+app.get("/asked", async (_request, response) => {
+  answered["/asked"] = profile();
+  crunchPrices(5);
+  response.json({});
+});
 app.get("/plain", async (_request, response) => {
   crunchPrices(5);
   await fetch(`${serviceBase}/plain-call`);
@@ -95,9 +108,9 @@ afterAll(() => {
   manager.disable();
 });
 
-/** The trace of a request to the app, once its last spans are in. */
-async function request(path: string): Promise<Trace> {
-  const response = await fetch(`${base}${path}`);
+/** The trace of a request to the app with these `headers`, once its last spans are in. */
+async function request(path: string, headers: Record<string, string> = {}): Promise<Trace> {
+  const response = await fetch(`${base}${path}`, { headers });
   await response.text();
   for (let waited = 0; waited < 2000; waited += 10) {
     const found = sent.find((done) => done.kind === "http" && done.attrs["http.path"] === path);
@@ -203,6 +216,13 @@ describe("profile()", () => {
     } finally {
       config.profile = false;
     }
+  });
+
+  it("keeps the reason of a trace its request's header profiled already", async () => {
+    const result = await request("/asked", { "X-Tracepanel-Profile": "1" });
+
+    expect(answered["/asked"]).toBe(true);
+    expect(result.attrs["profile.reason"]).toBe("header");
   });
 
   it("does nothing outside a trace", () => {
