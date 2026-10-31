@@ -431,11 +431,12 @@ export class Profiler {
   private frame(callFrame: CallFrame): ProfileFrame | null {
     const name = callFrame.functionName || "(anonymous)";
     if (!callFrame.url) return { function: name, module: null, file: "", line: 0, in_app: false };
-    const found = place(callFrame.url, callFrame.lineNumber + 1, callFrame.columnNumber + 1);
+    const found = place(callFrame.url, callFrame.lineNumber + 1, callFrame.columnNumber + 1, name);
     if (ownFile(found.file)) return null;
     const own = inApp(found.file, this.root);
     return {
-      function: name,
+      // As the source names it, where a minifier renamed it.
+      function: found.function || name,
       module: null,
       file: own ? relative(this.root, found.file) : libraryPath(found.file),
       line: found.line,

@@ -26,6 +26,8 @@ export interface StackFrame {
   line: number;
   /** 1-based, where the stack says it. */
   column?: number;
+  /** Where the function that runs the frame starts, in the code that ran (a CallSite's), when it is known. */
+  enclosing?: { line: number; column: number };
 }
 
 /**
@@ -78,6 +80,10 @@ export function stampOf(file: string): string {
 
 interface Cached {
   found: { map: SourceMap; at: string } | null;
+  /** The code's lines, read once a frame's name is looked for in them. */
+  lines?: string[] | null;
+  /** The source's names of the frames' functions, by the stack's name and place. */
+  names: Map<string, string>;
   /** The file's stamp, and its map file's when the map is one of its own, as they were read. */
   stamp: string;
   mapStamp: string;
@@ -124,8 +130,65 @@ function sourceMap(file: string): { map: SourceMap; at: string } | null {
   } catch {
     // No map, or one that can't be read: the frame stays as it is.
   }
-  maps.set(file, { found, stamp, mapStamp: found && found.at !== file ? stampOf(found.at) : "" });
+  maps.set(file, { found, stamp, mapStamp: found && found.at !== file ? stampOf(found.at) : "", names: new Map() });
   return found;
+}
+
+// A file past this size isn't read for its text (a source's lines, a bundle's names).
+const MAX_SOURCE = 2_000_000;
+const MAX_BUNDLE = 20_000_000;
+
+/** The names already found for a bundle's frames, while its map is the one read. */
+function cachedNames(file: string, found: { map: SourceMap; at: string }): Map<string, string> | undefined {
+  const cached = maps.get(file);
+  return cached?.found === found ? cached.names : undefined;
+}
+
+/** A bundle's lines, read once while its map is the one read; undefined for one too big or that can't be read. */
+function generatedLines(file: string): string[] | undefined {
+  const cached = maps.get(file);
+  if (cached && cached.lines !== undefined) return cached.lines ?? undefined;
+  let lines: string[] | null = null;
+  try {
+    if (statSync(file).size <= MAX_BUNDLE) lines = readFileSync(file, "utf8").split("\n");
+  } catch {
+    // Not readable: the stack's names stay.
+  }
+  if (cached) cached.lines = lines;
+  return lines ?? undefined;
+}
+
+/** Source files read for their text, by path, as of their modification time and size: a dev server's edits read anew. */
+const sources = new Map<string, { stamp: string; lines: string[] }>();
+/** A source map's text of a source, split into lines once. */
+const mappedLines = new Map<string, { text: string; lines: string[] }>();
+
+/**
+ * A source file's lines: as the source map that led to it holds them (what ran, though the file isn't on disk or
+ * changed since), else read from the file; undefined for a file too big or that can't be read.
+ */
+export function sourceLines(file: string): string[] | undefined {
+  const held = contents.get(file);
+  if (held !== undefined) {
+    if (held.length > MAX_SOURCE) return undefined;
+    const split = mappedLines.get(file);
+    if (split?.text === held) return split.lines;
+    const lines = held.split("\n");
+    mappedLines.set(file, { text: held, lines });
+    return lines;
+  }
+  try {
+    const { size, mtimeMs } = statSync(file);
+    if (size > MAX_SOURCE) return undefined;
+    const stamp = `${mtimeMs}:${size}`;
+    const cached = sources.get(file);
+    if (cached?.stamp === stamp) return cached.lines;
+    const lines = readFileSync(file, "utf8").split("\n");
+    sources.set(file, { stamp, lines });
+    return lines;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -133,11 +196,6 @@ function sourceMap(file: string): { map: SourceMap; at: string } | null {
  * changed since or isn't on disk (a bundle's virtual module).
  */
 const contents = new Map<string, string>();
-
-/** A source file's text as a source map that led to it holds it, when one did and holds it. */
-export function mappedSource(file: string): string | undefined {
-  return contents.get(file);
-}
 
 interface MapPayload {
   sources?: string[];
@@ -187,11 +245,15 @@ function sourcePath(source: string, mapFile: string, sourceRoot: string): string
   return isAbsolute(source) ? source : resolve(dirname(mapFile), sourceRoot, source);
 }
 
-/** Where a function is in the app's source: a file URL or path and a line and column (1-based) of the code that ran. */
-export function place(url: string, line: number, column: number): StackFrame {
+/**
+ * Where a function is in the app's source, and its name there: a file URL or path, the line and column (1-based) where
+ * it starts in the code that ran, and its name there (a profile's frame).
+ */
+export function place(url: string, line: number, column: number, name = ""): StackFrame {
   const file = url.startsWith("file://") ? fileURLToPath(url) : url;
   // This package's own code stays where it is: its source map leads out of it, to its TypeScript.
-  return ownFile(file) ? { function: "", file, line } : original({ function: "", file, line }, column);
+  if (ownFile(file)) return { function: name, file, line };
+  return original({ function: name, file, line, enclosing: { line, column } }, column);
 }
 
 /**
@@ -223,7 +285,15 @@ function siteFrame(site: NodeJS.CallSite): StackFrame | undefined {
   const column = site.getColumnNumber();
   if (!name || line === null || column === null) return undefined;
   const file = name.startsWith("file://") ? fileURLToPath(name) : name;
-  return { function: site.getFunctionName() ?? "<anonymous>", file, line, column };
+  const frame: StackFrame = { function: site.getFunctionName() ?? "<anonymous>", file, line, column };
+  const at = site as NodeJS.CallSite & {
+    getEnclosingLineNumber?(): number | null;
+    getEnclosingColumnNumber?(): number | null;
+  };
+  const enclosingLine = at.getEnclosingLineNumber?.();
+  const enclosingColumn = at.getEnclosingColumnNumber?.();
+  if (enclosingLine && enclosingColumn) frame.enclosing = { line: enclosingLine, column: enclosingColumn };
+  return frame;
 }
 
 /** A frame of the code that ran in the app's source, through this package's own reading of its source map. */
@@ -243,10 +313,133 @@ function original(frame: StackFrame, column: number): StackFrame {
     const payload = found.map.payload as MapPayload;
     const file = sourcePath(entry.originalSource, found.at, String(payload.sourceRoot ?? ""));
     keepContent(found.map, found.at, file);
-    return { function: frame.function, file, line: entry.originalLine + 1, column: entry.originalColumn + 1 };
+    return {
+      function: originalName(frame, column, found),
+      file,
+      line: entry.originalLine + 1,
+      column: entry.originalColumn + 1,
+    };
   } catch {
     return frame;
   }
+}
+
+// How far up a bundle a function's or class's definition is looked for, in lines.
+const MAX_LOOK_BACK = 5000;
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+const KEYWORDS = new Set(["function", "class", "async", "return", "new", "if", "for", "while", "switch", "catch"]);
+// A stack's names that are no function or class of the app's.
+const NOT_RENAMED = new Set(["Object", "Module", "<anonymous>", "async", "Promise", "Array"]);
+
+/**
+ * A frame's function as the source names it, where a minifier renamed it (`Object.k` -> `Object.placeOrder`,
+ * `o.checkout` -> `Cart.checkout`): each name found where it is defined in the code that ran (the function's start a
+ * CallSite gives, else its `function k`, `class o`, `k=` before the frame), and mapped there to the source's name
+ * (the map's `names`, else the source's text there). A name not found stays as it is.
+ */
+function originalName(frame: StackFrame, column: number, found: { map: SourceMap; at: string }): string {
+  const cached = cachedNames(frame.file, found);
+  const key = `${frame.function}\0${frame.line}:${column}\0${frame.enclosing?.line}:${frame.enclosing?.column}`;
+  const known = cached?.get(key);
+  if (known !== undefined) return known;
+  let name = frame.function;
+  try {
+    const lines = generatedLines(frame.file);
+    if (lines) {
+      const prefix = name.startsWith("new ") ? "new " : "";
+      const parts = name.slice(prefix.length).split(".");
+      const last = parts.length - 1;
+      const renamed = parts.map((part, index) => {
+        if (index === last && frame.enclosing) {
+          const at = definitionAt(lines, frame.enclosing.line, frame.enclosing.column);
+          const source = at && originalIdentifier(found, at.line, at.column);
+          if (source) return source;
+        }
+        if (!IDENTIFIER.test(part) || NOT_RENAMED.has(part)) return part;
+        const at = definitionBefore(lines, part, frame.line, column);
+        return (at && originalIdentifier(found, at.line, at.column)) || part;
+      });
+      name = prefix + renamed.join(".");
+    }
+  } catch {
+    // The name as the stack has it.
+  }
+  cached?.set(key, name);
+  return name;
+}
+
+/** Where the function that starts at line:column (1-based) is named: `function k(`, a method's `k(`, `k=(…)=>`. */
+function definitionAt(lines: string[], line: number, column: number): { line: number; column: number } | undefined {
+  const text = lines[line - 1];
+  if (text === undefined) return undefined;
+  const at = column - 1;
+  for (const pattern of [
+    /(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/y,
+    /class\s+([A-Za-z_$][\w$]*)/y,
+    /(?:(?:static|async|get|set)\s+|\*\s*)*([A-Za-z_$][\w$]*)\s*\(/y,
+  ]) {
+    pattern.lastIndex = at;
+    const match = pattern.exec(text);
+    const name = match?.[1];
+    if (match && name && !KEYWORDS.has(name)) return { line, column: at + match[0].lastIndexOf(name) + 1 };
+  }
+  // An arrow or a function expression assigned: `k=(r)=>`, `k:function(`.
+  const before = text.slice(Math.max(0, at - 200), at);
+  const assigned = /([A-Za-z_$][\w$]*)\s*[=:]\s*(?:async\s*)?$/.exec(before);
+  if (assigned?.[1] && !KEYWORDS.has(assigned[1])) return { line, column: at - before.length + assigned.index + 1 };
+  return undefined;
+}
+
+/** Where `name` is defined last before line:column: `function name(`, `class name`, `name=class`, `name=(`. */
+function definitionBefore(
+  lines: string[],
+  name: string,
+  line: number,
+  column: number,
+): { line: number; column: number } | undefined {
+  const escaped = name.replace(/\$/g, "\\$");
+  const pattern = new RegExp(
+    `(?:\\bfunction\\s*\\*?\\s*|\\bclass\\s+)(${escaped})(?![\\w$])|(?<![\\w$.])(${escaped})\\s*=\\s*(?:class\\b|function\\b|async\\b|\\(|[A-Za-z_$][\\w$]*\\s*=>)`,
+    "g",
+  );
+  for (let index = line - 1; index >= 0 && index >= line - MAX_LOOK_BACK; index--) {
+    const text = index === line - 1 ? (lines[index] ?? "").slice(0, column - 1) : (lines[index] ?? "");
+    let last: RegExpExecArray | undefined;
+    for (const match of text.matchAll(pattern)) last = match;
+    if (last) {
+      const offset = last[1] !== undefined ? last[0].length - name.length : 0;
+      return { line: index + 1, column: last.index + offset + 1 };
+    }
+  }
+  return undefined;
+}
+
+/** The source's name of the identifier at line:column of the code that ran: the map's `names` entry, else its text. */
+function originalIdentifier(found: { map: SourceMap; at: string }, line: number, column: number): string | undefined {
+  const entry = found.map.findEntry(line - 1, column - 1) as {
+    generatedLine?: number;
+    generatedColumn?: number;
+    originalSource?: string;
+    originalLine?: number;
+    originalColumn?: number;
+    name?: string;
+  };
+  // Only a mapping of the identifier itself says its name.
+  if (entry.generatedLine !== line - 1 || entry.generatedColumn !== column - 1 || !entry.originalSource)
+    return undefined;
+  if (entry.name && IDENTIFIER.test(entry.name)) return entry.name;
+  const payload = found.map.payload as MapPayload;
+  const file = sourcePath(entry.originalSource, found.at, String(payload.sourceRoot ?? ""));
+  keepContent(found.map, found.at, file);
+  const text = sourceLines(file)?.[entry.originalLine ?? -1]?.slice(entry.originalColumn ?? 0);
+  if (text === undefined) return undefined;
+  // The source's text there: the name, or the definition that starts there (`function placeOrder`, `const ship =`).
+  const match =
+    /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*|class\s+|(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)/.exec(
+      text,
+    );
+  const name = match?.[1];
+  return name && !KEYWORDS.has(name) ? name : undefined;
 }
 
 /** The project's own code: under the root, not a dependency, not a bundle, not Node's, not Tracepanel's. */

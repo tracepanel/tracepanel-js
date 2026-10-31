@@ -48,6 +48,13 @@
 - A bundle a dev server rewrites under the same name is mapped through
   its new source map: maps are read again once the bundle or its map
   changes (modification time and size). The first map read stayed.
+- A minified bundle's frames name their functions as the source does
+  (`placeOrder`, `Cart.checkout`, an arrow's `const shipOrder`), not as
+  the minifier renamed them (`k`, `o.checkout`): in a dump's or a query's
+  `code.origin`, an error's frames and a profile's flame graph. The name
+  is found where the function starts (V8's call site, or its definition
+  before the frame) and mapped there: the source map's `names`, else the
+  source's text.
 - An error's local variables mask the value under a key that names a
   secret inside a value (`{ password: '********' }`), not only a variable
   whose name does, and show a proxy without running its traps.

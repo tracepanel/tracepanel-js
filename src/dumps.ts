@@ -5,21 +5,18 @@
 // as, read from the call's line. Only the app's own calls are dumps; a library's stay log lines.
 
 import { Console } from "node:console";
-import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { Writable } from "node:stream";
 import { format, inspect, types } from "node:util";
 import type { Log } from "./model.js";
 import { MASK, sensitive } from "./request.js";
-import { inApp, mapped, mappedSource, originOf, ownFile, parseStack, type StackFrame } from "./stack.js";
+import { inApp, mapped, originOf, ownFile, parseStack, type StackFrame, sourceLines } from "./stack.js";
 
 /** How long an argument's text is at most, "… (truncated)" included. */
 export const MAX_REPR = 16_384;
 const TRUNCATED = "… (truncated)";
 // A string as long as the whole may be: inspect() cuts one at 10,000 characters.
 const INSPECT = { depth: 6, compact: false, breakLength: 80, colors: false, maxStringLength: MAX_REPR } as const;
-// A source file past this size isn't read for the arguments' text.
-const MAX_SOURCE = 2_000_000;
 // How far past the call's start its arguments are looked for, in characters.
 const MAX_CALL = 20_000;
 
@@ -117,8 +114,9 @@ function callSite(stack: string | undefined, sites?: readonly (StackFrame | unde
     const frame = parseStack(`Error\n${line}`)[0];
     if (!frame || !isAbsolute(frame.file) || ownFile(frame.file) || /^console\./i.test(frame.function)) continue;
     const ran = aligned ? sites?.[index] : undefined;
-    const ours = ran ? mapped(ran) : undefined;
-    return ours ? { ...ours, function: frame.function } : frame;
+    // The stack's name of the function (`Object.k`, `o.checkout`), in the source's names as the map has them.
+    const ours = ran ? mapped({ ...ran, function: frame.function }) : undefined;
+    return ours ?? frame;
   }
   return undefined;
 }
@@ -410,35 +408,6 @@ function printed(method: string, args: readonly unknown[]): string {
   } finally {
     output = "";
   }
-}
-
-/** Source files read for the arguments' text, by path, as of their modification time: a dev server's edits read anew. */
-const sources = new Map<string, { stamp: string; lines: string[] }>();
-/** A source map's text of a source, split into lines once. */
-const mappedLines = new Map<string, { text: string; lines: string[] }>();
-
-/**
- * A source file's lines: as the source map that led to it holds them (what ran, though the file isn't on disk or
- * changed since), else read from the file; undefined for a file too big or that can't be read.
- */
-function sourceLines(file: string): string[] | undefined {
-  const mapped = mappedSource(file);
-  if (mapped !== undefined) {
-    if (mapped.length > MAX_SOURCE) return undefined;
-    const split = mappedLines.get(file);
-    if (split?.text === mapped) return split.lines;
-    const lines = mapped.split("\n");
-    mappedLines.set(file, { text: mapped, lines });
-    return lines;
-  }
-  const { size, mtimeMs } = statSync(file);
-  if (size > MAX_SOURCE) return undefined;
-  const stamp = `${mtimeMs}:${size}`;
-  const cached = sources.get(file);
-  if (cached?.stamp === stamp) return cached.lines;
-  const lines = readFileSync(file, "utf8").split("\n");
-  sources.set(file, { stamp, lines });
-  return lines;
 }
 
 /**
