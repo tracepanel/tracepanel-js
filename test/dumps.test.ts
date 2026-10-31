@@ -3,16 +3,18 @@
 // biome-ignore-all lint/suspicious/noConsole: the terminal's console methods, swapped and put back.
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: source text with template literals in it.
 import { readFileSync } from "node:fs";
+import { inspect } from "node:util";
 import { context, SpanKind, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Config, loadConfig } from "../src/config.js";
 import { captureConsole } from "../src/console.js";
-import { argumentsAt, MAX_REPR, masked, reprOf } from "../src/dumps.js";
+import { argumentsAt, MAX_REPR, masked, maskText, reprOf } from "../src/dumps.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
 import { dirAndTable, inspectOrder, longValue, Order, plainLine, withSecret, withSecretKeys } from "./app/debug.js";
+import { withVaultAndProxy } from "./app/hidden.js";
 
 // The project is test/app: its code is the app's, this file stands for the framework.
 const APP = new URL("./app/", import.meta.url);
@@ -265,13 +267,76 @@ describe("dumps", () => {
     expect(printed[0]?.[1][0]).toBe(order);
   });
 
+  it("masks by text what can't be copied: a class whose inspect reads #private fields, a proxy, its traps not run", async () => {
+    const traps: string[] = [];
+    const result = await app().request(() => withVaultAndProxy(traps));
+    // A proxy's target as inspect() shows it: in Proxy(…) on newer Node versions.
+    const asProxy = (text: string) => (inspect(new Proxy({}, {})).startsWith("Proxy") ? `Proxy(${text})` : text);
+
+    expect(logs(result)).toEqual([
+      {
+        level: "debug",
+        logger: "console",
+        message: `Vault { owner: 'ann', apiKey: '********' } ${asProxy("{ name: 'ann', password: '********', nested: { token: '********' } }")}`,
+        exception: null,
+        attrs: {
+          "log.kind": "dump",
+          "dump.lang": "javascript",
+          "dump.args": [
+            { expr: "vault", repr: "Vault { owner: 'ann', apiKey: '********' }", type: "Vault", len: null },
+            {
+              expr: "account",
+              repr: asProxy("{\n  name: 'ann',\n  password: '********',\n  nested: {\n    token: '********'\n  }\n}"),
+              type: "Proxy",
+              len: null,
+            },
+          ],
+          "code.origin": `hidden.ts:${
+            readFileSync(new URL("hidden.ts", APP), "utf8")
+              .split("\n")
+              .findIndex((text) => text.includes("// hidden")) + 1
+          } in withVaultAndProxy`,
+        },
+      },
+    ]);
+
+    expect(traps).toEqual([]);
+  });
+
+  it("masks a secret's value in a text by its key: strings over lines, brackets, Map keys, name=value", () => {
+    expect([
+      maskText("{ apiKey: 'a', b: 1 }"),
+      maskText("{\n  auth: {\n    user: 'x'\n  },\n  b: [ 1 ]\n}"),
+      maskText("Map(1) { 'token' => 'abc' }"),
+      maskText("{ password: 'line one\\n' +\n    'line two', ok: true }"),
+      maskText("{ secret: Order { id: 1 }, live: [Getter] }"),
+      maskText("{ [Symbol(apiToken)]: 42 }"),
+      maskText("'postgres://db?user=ann&password=pw&x=1'"),
+      maskText("{ name: 'token' }"),
+    ]).toEqual([
+      "{ apiKey: '********', b: 1 }",
+      "{\n  auth: '********',\n  b: [ 1 ]\n}",
+      "Map(1) { 'token' => '********' }",
+      "{ password: '********', ok: true }",
+      "{ secret: '********', live: [Getter] }",
+      "{ [Symbol(apiToken)]: '********' }",
+      "'postgres://db?user=ann&password=********&x=1'",
+      "{ name: 'token' }",
+    ]);
+  });
+
   it("leaves a value with no secret in it as it is", () => {
     const order = { id: 7, items: [{ sku: "book" }] };
     const cyclic: Record<string, unknown> = { name: "loop" };
     cyclic.self = cyclic;
 
-    expect([masked(order), masked(cyclic), masked("token"), masked(null)]).toEqual([order, cyclic, "token", null]);
-    expect(masked(order)).toBe(order);
+    expect([masked(order), masked(cyclic), masked("token"), masked(null)]).toEqual([
+      { value: order, byText: false },
+      { value: cyclic, byText: false },
+      { value: "token", byText: false },
+      { value: null, byText: false },
+    ]);
+    expect(masked(order).value).toBe(order);
   });
 
   it("masks inside a Set's items, and a Map subclass's copy keeps its class", () => {
@@ -279,7 +344,7 @@ describe("dumps", () => {
     const cache = new Cache([["auth", "a-1"]]);
     const set = new Set([{ id: 1, private_key: "pk" }]);
 
-    expect([reprOf(masked(cache)), reprOf(masked(set)).replace(/\s+/g, " ")]).toEqual([
+    expect([reprOf(masked(cache).value), reprOf(masked(set).value).replace(/\s+/g, " ")]).toEqual([
       "Cache(1) [Map] {\n  'auth' => '********'\n}",
       "Set(1) { { id: 1, private_key: '********' } }",
     ]);

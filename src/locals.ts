@@ -9,7 +9,8 @@
 // the callers that were waiting on an `await` (those have no locals here). A process run under a debugger
 // (--inspect) is left alone: its pauses would stop the debugger too.
 
-import { inspect } from "node:util";
+import { inspect, types } from "node:util";
+import { maskText } from "./dumps.js";
 import { call, connect, inspector, type Session } from "./inspector.js";
 import { MASK, sensitive } from "./request.js";
 import { asyncFrames, inApp, parseStack, type StackFrame } from "./stack.js";
@@ -49,13 +50,14 @@ interface Paused {
 /**
  * A value as the console shows it, as Python's reprlib cuts one: a plain object, an array, a Map or a Set by its
  * items, nested two deep, ten of each at most; anything else (a class's instance: a request, a connection) and a
- * string at most 160 characters. Masked under a sensitive name.
+ * string at most 160 characters. Masked under a sensitive name, and a value under a key that names a secret inside it
+ * (`{ password: '********' }`), from inspect()'s text: a proxy is shown as inspect() shows it, without its traps.
  */
 export function repr(name: string, value: unknown): string {
   if (sensitive(name)) return MASK;
   try {
     // On one line: inspect() lays a long array out in rows.
-    const text = inspect(value, INSPECT).replace(/\s*\n\s*/g, " ");
+    const text = maskText(inspect(value, INSPECT)).replace(/\s*\n\s*/g, " ");
     const limit = container(value) ? MAX_REPR : MAX_OTHER;
     return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
   } catch {
@@ -65,7 +67,7 @@ export function repr(name: string, value: unknown): string {
 
 function container(value: unknown): boolean {
   if (typeof value === "string") return true;
-  if (value === null || typeof value !== "object") return false;
+  if (value === null || typeof value !== "object" || types.isProxy(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return (
     Array.isArray(value) ||

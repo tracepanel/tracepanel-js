@@ -6,6 +6,7 @@ import type { Config } from "./config.js";
 import { DUMPING, dump, isDump } from "./dumps.js";
 import type { Log } from "./model.js";
 import type { TracepanelProcessor } from "./processor.js";
+import { stackWithSites } from "./stack.js";
 
 const LEVELS: Record<string, Log["level"]> = {
   debug: "debug",
@@ -97,7 +98,8 @@ function dumpOf(method: string, args: unknown[], root: string): Omit<Log, "span_
   const limit = Error.stackTraceLimit;
   try {
     Error.stackTraceLimit = Math.max(limit, DUMP_DEPTH);
-    return dump(method, args, new Error().stack, root);
+    const { stack, sites } = stackWithSites();
+    return dump(method, args, stack, root, sites);
   } catch {
     return null;
   } finally {

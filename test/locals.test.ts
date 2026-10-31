@@ -173,6 +173,7 @@ describe("a value as text", () => {
       repr("deep", { a: { b: { c: { d: 1 } } } }),
       repr("api_key", "k-123"),
       repr("sessionToken", { id: 1 }),
+      repr("user", { name: "ann", password: "pw" }),
       repr("huge", Object.fromEntries(Array.from({ length: 200 }, (_, at) => [`key${at}`, at]))).length,
     ]).toEqual([
       "3",
@@ -181,6 +182,7 @@ describe("a value as text", () => {
       "{ a: { b: { c: [Object] } } }",
       "********",
       "********",
+      "{ name: 'ann', password: '********' }",
       1000,
     ]);
 

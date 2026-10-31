@@ -26,11 +26,16 @@
   value as Node prints it (16 KiB at most), its type and length. In
   bundled or transpiled code (esbuild, tsc, Vite, a Next.js dev bundle)
   the call is found in the app's source through the source map, and read
-  from the map's `sourcesContent` when it has it. An argument whose source
+  from the map's `sourcesContent` when it has it, with
+  `--enable-source-maps` too (the call's place in the code that ran is
+  read from V8's call sites). An argument whose source
   names a secret (`apiToken`, `password`) is masked, and so is the value
   under a key that names one inside an argument (an object's key, a
   class's field, a Map's key), on a copy for the dump: the app's value is
-  never changed, no getter runs, and the terminal prints it as before.
+  never changed, no getter runs, and the terminal prints it as before. A
+  value that can't be copied (a class whose `inspect` reads its `#private`
+  fields) and a proxy (shown without running its traps) are masked in
+  their printed text instead (`apiKey: '********'`, `password=********`).
   Only the app's own calls inside a trace are dumps; console prints as
   before. `TRACEPANEL_DUMPS=0` turns them off.
 
@@ -40,6 +45,12 @@
   app's source through an inline source map longer than 2,000 characters,
   and through the `.map` beside a bundle that names none. They stayed in
   the bundle.
+- A bundle a dev server rewrites under the same name is mapped through
+  its new source map: maps are read again once the bundle or its map
+  changes (modification time and size). The first map read stayed.
+- An error's local variables mask the value under a key that names a
+  secret inside a value (`{ password: '********' }`), not only a variable
+  whose name does, and show a proxy without running its traps.
 
 ## 0.9.2 (2026-10-30)
 
