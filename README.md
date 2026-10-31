@@ -341,7 +341,9 @@ the line that ran it and the fix:
 - Dumps: `console.dir()`, `console.table()` and `console.log()` of an
   object, in the call tree with each argument's source text and value.
   In bundled or transpiled code the source text is read through the
-  source map (inline, or the `.map` file).
+  source map (inline, or the `.map` file). Values under a name that looks
+  secret (`password`, `apiKey`), as an argument or a key inside one, are
+  masked in the dump.
 - Errors thrown in a handler, with your frames, their source and local
   variables.
 - Where a request's CPU time and memory go, when you ask for a profile, on
