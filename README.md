@@ -343,7 +343,9 @@ the line that ran it and the fix:
 - Errors thrown in a handler, with your frames, their source and local
   variables.
 - Where a request's CPU time and memory go, when you ask for a profile, on
-  Node.
+  Node. The trace says why it was profiled in `profile.reason`: `setting`,
+  `header`, `cookie` (the panel's toggle), `parent` (another app's
+  profiled call) or `code`.
 - The caller's trace, when a request carries a W3C `traceparent`.
 
 What each integration records, and its limits, are in

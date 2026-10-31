@@ -29,6 +29,11 @@ export const COOKIE = "tracepanel_profile";
 export const ATTRIBUTE = "tracepanel.profile";
 /** In the context a framework starts the request's root span in (Next.js's): what the request asked for. */
 export const ASKED = createContextKey("tracepanel.profile");
+/** On a request's root span, and in the framework's context beside ASKED: how the request asked (Reason). */
+export const REASON_ATTRIBUTE = "tracepanel.profile.reason";
+export const REASON = createContextKey("tracepanel.profile.reason");
+/** On a profiled trace: why it is profiled. */
+export const PROFILE_REASON = "profile.reason";
 
 // How deep a stack is kept: a recursion beyond it is cut, outermost frames kept.
 const MAX_DEPTH = 128;
@@ -58,15 +63,46 @@ export function asking(value: unknown): Asked | undefined {
 }
 
 /**
- * What a request asks for: the X-Tracepanel-Profile header's, else the cookie's the panel's toggle sets; undefined
- * when neither asks.
+ * Why a trace is profiled: the `profile` setting, a request's X-Tracepanel-Profile header (a person's, or a tool's),
+ * the panel's cookie, the header on a call from another app's profiled trace (it carries a traceparent too: a
+ * backend's call, the browser's), or the app's own code (a root span it marks with tracepanel.profile).
  */
-export function requested(headers: RequestHeaders): Asked | undefined {
-  const asked = asking(headerValue(headers[HEADER])?.trim());
-  if (asked) return asked;
+export type Reason = "setting" | "header" | "cookie" | "parent" | "code";
+
+/** What a request asks for, and how; undefined when it asks nothing. */
+export interface Ask {
+  asked: Asked;
+  reason: Reason;
+}
+
+/**
+ * What a request asks for: the X-Tracepanel-Profile header's (from another app's profiled trace when a traceparent
+ * came with it), else the cookie's the panel's toggle sets; undefined when neither asks.
+ */
+export function asks(headers: RequestHeaders): Ask | undefined {
+  const fromHeader = asking(headerValue(headers[HEADER])?.trim());
+  if (fromHeader) return { asked: fromHeader, reason: headerValue(headers.traceparent) ? "parent" : "header" };
   const cookies = headerValue(headers.cookie);
   if (cookies?.includes(COOKIE) !== true) return undefined;
-  return asking(parseCookies(cookies).find(([name]) => name === COOKIE)?.[1]);
+  const fromCookie = asking(parseCookies(cookies).find(([name]) => name === COOKIE)?.[1]);
+  return fromCookie ? { asked: fromCookie, reason: "cookie" } : undefined;
+}
+
+/** What a request asks for (asks() without how). */
+export function requested(headers: RequestHeaders): Asked | undefined {
+  return asks(headers)?.asked;
+}
+
+/** A root span's attributes for what a request asks: none when it asks nothing. */
+export function askAttributes(ask: Ask | undefined): Record<string, string> {
+  return ask ? { [ATTRIBUTE]: ask.asked, [REASON_ATTRIBUTE]: ask.reason } : {};
+}
+
+const REASONS = new Set<unknown>(["setting", "header", "cookie", "parent", "code"]);
+
+/** A reason as a span or a context holds it; undefined for anything else. */
+export function reasonOf(value: unknown): Reason | undefined {
+  return REASONS.has(value) ? (value as Reason) : undefined;
 }
 
 /**

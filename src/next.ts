@@ -16,7 +16,7 @@ import https from "node:https";
 import { context } from "@opentelemetry/api";
 import type { BrowserOptions } from "./browser.js";
 import { headersOnResponses } from "./headers.js";
-import { ASKED as PROFILE, requested } from "./profile.js";
+import { ASKED, asks, REASON } from "./profile.js";
 import { answeredHere, browserModule, forward, PREFIX, recordingScript } from "./proxy.js";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
@@ -72,8 +72,11 @@ export function serveConsole(tracepanel: Runtime): void {
         return true;
       }
       // A request that asks to be profiled: Next.js starts its root span in this context, which says what it asked.
-      const asked = event === "request" && req ? requested(req.headers) : undefined;
-      if (asked) return context.with(context.active().setValue(PROFILE, asked), () => emit.call(this, event, ...args));
+      const ask = event === "request" && req ? asks(req.headers) : undefined;
+      if (ask) {
+        const asking = context.active().setValue(ASKED, ask.asked).setValue(REASON, ask.reason);
+        return context.with(asking, () => emit.call(this, event, ...args));
+      }
       return emit.call(this, event, ...args);
     } as typeof emit;
   }

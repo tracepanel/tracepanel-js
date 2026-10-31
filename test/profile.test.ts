@@ -11,7 +11,7 @@ import { hello } from "../src/agent.js";
 import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
-import { ASKED, requested } from "../src/profile.js";
+import { ASKED, asks, REASON, requested } from "../src/profile.js";
 import { catalog, crunchOrders, crunchPrices, crunchRates, crunchStock, crunchTaxes, loadCatalog } from "./app/shop.js";
 
 // The project is test/app: its code is the app's, this file stands for the framework.
@@ -72,14 +72,18 @@ function app(env: Record<string, string> = {}) {
   const processor = new TracepanelProcessor(config, { submit: (done) => sent.push(done) });
   const tracer = new BasicTracerProvider({ spanProcessors: [processor] }).getTracer("test");
 
-  /** A request's root span; `profile`: what it asks to be profiled for, as Node's HTTP server marks one. */
-  function start(path: string, profile: boolean | "1" | "memory" = false): OtelSpan {
+  /**
+   * A request's root span; `profile`: what it asks to be profiled for, `reason`: how, as Node's HTTP server marks one
+   * (the app's own code marks none).
+   */
+  function start(path: string, profile: boolean | "1" | "memory" = false, reason?: string): OtelSpan {
     return tracer.startSpan("GET", {
       kind: SpanKind.SERVER,
       attributes: {
         "http.request.method": "GET",
         "url.path": path,
         ...(profile ? { "tracepanel.profile": profile } : {}),
+        ...(reason ? { "tracepanel.profile.reason": reason } : {}),
       },
     });
   }
@@ -163,6 +167,48 @@ describe("a trace's profile", () => {
     const every = always.start("/every");
     crunchRates(50);
     expect(sampled(await always.end(every, "/every")).crunchRates).toBeGreaterThan(0);
+  });
+
+  it("says why the trace is profiled in profile.reason: the request's ask, the app's own code, or the setting", async () => {
+    const { start, end } = app();
+    const fromHeader = start("/header", "1", "header");
+    busy(5);
+    const header = await end(fromHeader, "/header");
+    const fromCookie = start("/cookie", "memory", "cookie");
+    busy(5);
+    const cookie = await end(fromCookie, "/cookie");
+    const fromParent = start("/parent", "1", "parent");
+    busy(5);
+    const parent = await end(fromParent, "/parent");
+    const byCode = start("/code", true);
+    busy(5);
+    const code = await end(byCode, "/code");
+    const inNext = context.with(context.active().setValue(ASKED, "1").setValue(REASON, "cookie"), () => start("/next"));
+    busy(5);
+    const next = await end(inNext, "/next");
+    const plain = start("/plain");
+    busy(5);
+    const unprofiled = await end(plain, "/plain");
+
+    expect([header, cookie, parent, code, next, unprofiled].map((done) => done.attrs["profile.reason"])).toEqual([
+      "header",
+      "cookie",
+      "parent",
+      "code",
+      "cookie",
+      undefined,
+    ]);
+
+    const always = app({ TRACEPANEL_PROFILE: "1" });
+    const every = always.start("/every");
+    busy(5);
+    const asked = always.start("/asked", "1", "header");
+    busy(5);
+
+    expect([
+      (await always.end(every, "/every")).attrs["profile.reason"],
+      (await always.end(asked, "/asked")).attrs["profile.reason"],
+    ]).toEqual(["setting", "header"]);
   });
 
   it("leaves out what was sampled while another trace ran too, and counts it", async () => {
@@ -300,6 +346,24 @@ describe("asking for a profile", () => {
       requested({ cookie: "tracepanel_profile=all" }),
       requested({}),
     ]).toEqual(["1", "1", "1", "memory", "memory", undefined, undefined, undefined, undefined]);
+  });
+
+  it("says how the request asked: the header, the header with a traceparent (another app's call), the cookie", () => {
+    const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+    expect([
+      asks({ "x-tracepanel-profile": "1" }),
+      asks({ "x-tracepanel-profile": "memory", traceparent }),
+      asks({ cookie: "tracepanel_profile=1", traceparent }),
+      asks({ cookie: "tracepanel_profile=0" }),
+      asks({}),
+    ]).toEqual([
+      { asked: "1", reason: "header" },
+      { asked: "memory", reason: "parent" },
+      { asked: "1", reason: "cookie" },
+      undefined,
+      undefined,
+    ]);
   });
 
   it("is offered in the hello while profiling is on, every trace's when TRACEPANEL_PROFILE=1", () => {

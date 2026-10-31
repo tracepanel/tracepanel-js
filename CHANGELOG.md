@@ -10,11 +10,13 @@
   100 ms but Snowflake, to 3 s. The hello sends them to the agent
   (`slow_sql_ms_by_db`, `long_transaction_ms_by_db`), where they win over
   the app's limits and the warehouse defaults.
-
-## Unreleased
-
-### Added
-
+- A profiled trace says why in `profile.reason`: `setting`
+  (`TRACEPANEL_PROFILE=1`), `header` (an `X-Tracepanel-Profile` header),
+  `cookie` (the panel's Profile toggle), `parent` (the header on a call
+  from another app's profiled trace, or the browser's, with a
+  `traceparent`), or `code` (a root span the app marked with
+  `tracepanel.profile` itself). A request that asks while the setting is
+  on says how it asked.
 - Dumps: a developer's own debug output, recorded on the current span and
   always shown in the call tree, as the Python SDK records devtools'
   `debug()`. `console.dir()`, `console.table()`, and `console.log()`,
