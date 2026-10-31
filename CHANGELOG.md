@@ -4,6 +4,17 @@
 
 ### Added
 
+- `TRACEPANEL_SLOW_SQL_MS` and `TRACEPANEL_LONG_TRANSACTION_MS` take a
+  limit per database, by its `db.system`:
+  `TRACEPANEL_SLOW_SQL_MS=100,snowflake=3000` holds every database to
+  100 ms but Snowflake, to 3 s. The hello sends them to the agent
+  (`slow_sql_ms_by_db`, `long_transaction_ms_by_db`), where they win over
+  the app's limits and the warehouse defaults.
+
+## Unreleased
+
+### Added
+
 - Dumps: a developer's own debug output, recorded on the current span and
   always shown in the call tree, as the Python SDK records devtools'
   `debug()`. `console.dir()`, `console.table()`, and `console.log()`,
