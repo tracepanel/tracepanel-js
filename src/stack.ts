@@ -1,7 +1,7 @@
 // The app's own code in a V8 stack: where a query was made (code.origin), or the library code that asked for one
 // none of the app's code made (code.caller); and an error's frames with their source.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import nodeModule, { type SourceMap } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,11 +66,38 @@ function mappingUrl(text: string): string | undefined {
   return at < 0 ? undefined : MAPPING_URL.exec(text.slice(at))?.[1];
 }
 
-/** A file's source map and where it is (its sources are relative to it), or null: cached by the file's path. */
-const maps = new Map<string, { map: SourceMap; at: string } | null>();
+/** A file's modification time and size, or "" for none: a cached map or source is read again once it changes. */
+export function stampOf(file: string): string {
+  try {
+    const { mtimeMs, size } = statSync(file);
+    return `${mtimeMs}:${size}`;
+  } catch {
+    return "";
+  }
+}
+
+interface Cached {
+  found: { map: SourceMap; at: string } | null;
+  /** The file's stamp, and its map file's when the map is one of its own, as they were read. */
+  stamp: string;
+  mapStamp: string;
+}
+
+/**
+ * A file's source map and where it is (its sources are relative to it), or null: cached by the file's path, read
+ * again once the file or its map file changes (a dev server rewrites a chunk under the same name).
+ */
+const maps = new Map<string, Cached>();
 
 function sourceMap(file: string): { map: SourceMap; at: string } | null {
-  if (maps.has(file)) return maps.get(file) ?? null;
+  const stamp = stampOf(file);
+  const cached = maps.get(file);
+  if (
+    cached?.stamp === stamp &&
+    (!cached.found || cached.found.at === file || cached.mapStamp === stampOf(cached.found.at))
+  ) {
+    return cached.found;
+  }
   let found: { map: SourceMap; at: string } | null = null;
   try {
     // The map Node loaded with the file (--enable-source-maps), else the one its sourceMappingURL names (inline, or
@@ -97,7 +124,7 @@ function sourceMap(file: string): { map: SourceMap; at: string } | null {
   } catch {
     // No map, or one that can't be read: the frame stays as it is.
   }
-  maps.set(file, found);
+  maps.set(file, { found, stamp, mapStamp: found && found.at !== file ? stampOf(found.at) : "" });
   return found;
 }
 
@@ -119,27 +146,32 @@ interface MapPayload {
   sections?: { map: MapPayload }[];
 }
 
-/** The maps and sources keepContent() looked through once, as `map\0source`: a bundle's map has thousands. */
-const looked = new Set<string>();
+/** The sources each map was looked through for once: a bundle's map has thousands. A map read again is new. */
+const looked = new WeakMap<object, Set<string>>();
 
 /** Keep the text the map holds for the source at `path`, read from its sources (an index map's sections' too). */
-function keepContent(payload: MapPayload, mapFile: string, path: string): void {
-  const key = `${mapFile}\0${path}`;
-  if (contents.has(path) || looked.has(key)) return;
-  looked.add(key);
-  findContent(payload, mapFile, path);
+function keepContent(map: SourceMap, mapFile: string, path: string): void {
+  let paths = looked.get(map);
+  if (!paths) {
+    paths = new Set();
+    looked.set(map, paths);
+  }
+  if (paths.has(path)) return;
+  paths.add(path);
+  // A map that holds no text of it (read again without it): the file is read, not an older map's text.
+  if (!findContent(map.payload as MapPayload, mapFile, path)) contents.delete(path);
 }
 
-function findContent(payload: MapPayload, mapFile: string, path: string): void {
+function findContent(payload: MapPayload, mapFile: string, path: string): boolean {
   const sourceRoot = String(payload.sourceRoot ?? "");
   for (const [index, source] of (payload.sources ?? []).entries()) {
     const content = payload.sourcesContent?.[index];
     if (typeof content === "string" && sourcePath(source, mapFile, sourceRoot) === path) {
       contents.set(path, content);
-      return;
+      return true;
     }
   }
-  for (const section of payload.sections ?? []) findContent(section.map, mapFile, path);
+  return (payload.sections ?? []).some((section) => findContent(section.map, mapFile, path));
 }
 
 /** A source map's name for a source, as a path: a file URL, Turbopack's [project]/, or relative to the map. */
@@ -162,6 +194,44 @@ export function place(url: string, line: number, column: number): StackFrame {
   return ownFile(file) ? { function: "", file, line } : original({ function: "", file, line }, column);
 }
 
+/**
+ * The current stack, and the place in the code that ran of each of its lines: V8's CallSites, which no source map
+ * changed (Node maps a stack with --enable-source-maps in its own prepareStackTrace only, a dev tool in its own). A
+ * line the stack shows mapped to a source that isn't on disk is mapped here again from that place, where the map's
+ * sourcesContent is at hand. The global prepareStackTrace is put back at once.
+ */
+export function stackWithSites(): { stack: string | undefined; sites: (StackFrame | undefined)[] } {
+  const stack = new Error().stack;
+  const previous = Error.prepareStackTrace;
+  let sites: (StackFrame | undefined)[] = [];
+  try {
+    Error.prepareStackTrace = (_error, callSites) => callSites;
+    const holder: { stack?: unknown } = {};
+    Error.captureStackTrace(holder);
+    if (Array.isArray(holder.stack)) sites = (holder.stack as NodeJS.CallSite[]).map(siteFrame);
+  } catch {
+    // A runtime without CallSites: the stack as it is.
+  } finally {
+    Error.prepareStackTrace = previous;
+  }
+  return { stack, sites };
+}
+
+function siteFrame(site: NodeJS.CallSite): StackFrame | undefined {
+  const name = site.getFileName() ?? site.getScriptNameOrSourceURL?.();
+  const line = site.getLineNumber();
+  const column = site.getColumnNumber();
+  if (!name || line === null || column === null) return undefined;
+  const file = name.startsWith("file://") ? fileURLToPath(name) : name;
+  return { function: site.getFunctionName() ?? "<anonymous>", file, line, column };
+}
+
+/** A frame of the code that ran in the app's source, through this package's own reading of its source map. */
+export function mapped(frame: StackFrame): StackFrame | undefined {
+  const found = original(frame, frame.column ?? 1);
+  return found === frame ? undefined : found;
+}
+
 /** The frame in the app's source, when its file is a bundle with a source map. */
 function original(frame: StackFrame, column: number): StackFrame {
   if (!frame.file || !isAbsolute(frame.file) || frame.file.includes(`${sep}node_modules${sep}`)) return frame;
@@ -172,7 +242,7 @@ function original(frame: StackFrame, column: number): StackFrame {
     if (!("originalSource" in entry) || !entry.originalSource) return frame;
     const payload = found.map.payload as MapPayload;
     const file = sourcePath(entry.originalSource, found.at, String(payload.sourceRoot ?? ""));
-    keepContent(payload, found.at, file);
+    keepContent(found.map, found.at, file);
     return { function: frame.function, file, line: entry.originalLine + 1, column: entry.originalColumn + 1 };
   } catch {
     return frame;

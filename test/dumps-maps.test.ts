@@ -150,6 +150,40 @@ describe("a dump in bundled code", () => {
   });
 });
 
+describe("a bundle rewritten under the same name", () => {
+  it("is read again: its new map, the new source's text", () => {
+    const entry = join(root, "src", "rewritten.ts");
+    const out = join(root, "dist", "rewritten.js");
+    writeFileSync(entry, readFileSync(SOURCE, "utf8"));
+    bundle(entry, out, "linked");
+
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n")).exprs).toEqual([
+      ["order", "{\n  id: 7\n}"],
+      ["order.items.length", "2"],
+    ]);
+
+    // The dev server's next build: another line before, the variable renamed.
+    const edited = readFileSync(SOURCE, "utf8")
+      .replace("export function inspectOrder", "export const added = 1;\n\nexport function inspectOrder")
+      .replace("console.log(order, order.items.length)", "console.log(basket, basket.items.length)")
+      .replace("const order = { id: 7, items", "const basket = { id: 7, items");
+    writeFileSync(entry, edited);
+    bundle(entry, out, "linked");
+    const later = new Date(Date.now() + 5000);
+    utimesSync(out, later, later);
+    utimesSync(`${out}.map`, later, later);
+
+    expect(dumped([{ id: 7 }, 2], stackAt(out, ORDER, "n"))).toEqual({
+      exprs: [
+        ["basket", "{\n  id: 7\n}"],
+        ["basket.items.length", "2"],
+      ],
+      origin: `src/rewritten.ts:${edited.split("\n").findIndex((line) => line.includes("// log")) + 1} in n`,
+      message: "{ id: 7 } 2",
+    });
+  });
+});
+
 describe("a dump in transpiled code", () => {
   it("reads tsc's output through its .js.map, the source from the file", () => {
     execFileSync(TSC, [
