@@ -33,6 +33,11 @@ trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [process
 const app = new Hono();
 app.use(middleware());
 app.get("/books/:id", (c) => c.html(`<html><head></head><body>${c.req.param("id")}</body></html>`));
+// A GraphQL endpoint whose server fails after it read the request (a 503): the trace keeps the operation it carried.
+app.on(["GET", "POST"], "/graphql", async (c) => {
+  if (c.req.method === "POST") await c.req.json();
+  return c.json({ errors: [{ message: "unavailable" }] }, 503);
+});
 
 const server = serve({ port: 0, fetch: app.fetch }) as { port: number; stop(force?: boolean): void };
 
@@ -65,6 +70,24 @@ try {
       ],
     ],
   );
+
+  const graphql = `http://127.0.0.1:${server.port}/graphql`;
+  const post = fetch(graphql, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operationName: "Authors", query: "query Authors { authors { id } }" }),
+  });
+  const get = fetch(`${graphql}?query=${encodeURIComponent("query Books { books { id } }")}`);
+  for (const [sent, name] of [
+    [post, "Authors"],
+    [get, "Books"],
+  ] as const) {
+    const failed = await traceOf(await sent);
+    assert.deepEqual(
+      [failed.name, failed.status, failed.attrs["graphql.operation.type"], failed.attrs["graphql.operation.name"]],
+      [`GraphQL query ${name}`, "error", "query", name],
+    );
+  }
 
   // biome-ignore lint/suspicious/noConsole: the script's result, for CI's log
   console.log("Hono on Bun traced");

@@ -17,6 +17,7 @@ const processor = {
   framework: () => "Bun.serve",
   setFramework: () => {},
   setTraceAttrs: (attrs: Attrs) => recorded.push(attrs),
+  readOperation: () => {},
 } as unknown as TracepanelProcessor;
 const tracepanel = {
   config: { ...loadConfig({}), enabled: true },
