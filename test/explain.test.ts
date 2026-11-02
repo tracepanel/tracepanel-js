@@ -170,3 +170,22 @@ test("pg handed over as an ES module's namespace is a database EXPLAIN can run o
   // On that database, not on another one the app queried.
   expect(FakeClient.ran.map((ran) => ran.config["host"])).toEqual(["esm-db", "esm-db", "esm-db", "esm-db"]);
 });
+
+test("a query that changes data is refused before any session opens", async () => {
+  const instrumentation = new DatabasesInstrumentation();
+  const [pg] = instrumentation.getModuleDefinitions();
+  const Client = freshClient();
+  pg?.patch?.({ Client }, "8.13.0");
+  const settings = { host: "refused-db", port: 5432, database: "store", user: "shop", password: "secret" };
+  await (new Client(settings) as unknown as { query(sql: string): Promise<unknown> }).query("SELECT 1");
+
+  const refused = explain({
+    sql: "EXPLAIN (ANALYZE, BUFFERS) WITH gone AS (DELETE FROM books RETURNING id) SELECT * FROM gone",
+    params: [],
+    vendor: "postgresql",
+    server: "refused-db",
+  });
+
+  await expect(refused).rejects.toThrow("This query changes data (DELETE inside WITH): it isn't explained.");
+  expect(FakeClient.ran.map((ran) => ran.sql)).toEqual(["SELECT 1"]);
+});

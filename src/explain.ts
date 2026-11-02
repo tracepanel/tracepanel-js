@@ -5,13 +5,14 @@
 // its settings (the password among them), and EXPLAIN opens one of its own with them, so it never runs inside the
 // app's transaction. Whatever EXPLAIN ANALYZE does is rolled back. A SQLite database (sqlite.ts) is explained on the
 // app's own connection, the last one that queried that file: EXPLAIN QUERY PLAN only plans, and the connection is
-// the app's thread's, between its statements.
+// the app's thread's, between its statements. Only an explainable statement runs, the agent's rule (explainable.ts).
 
 import {
   InstrumentationBase,
   InstrumentationNodeModuleDefinition,
   InstrumentationNodeModuleFile,
 } from "@opentelemetry/instrumentation";
+import { checkExplain } from "./explainable.js";
 import { commonJs } from "./transactions.js";
 
 /** What the agent asks: the EXPLAIN to run, its parameters, and which database (the span's). */
@@ -111,6 +112,8 @@ function databaseFor(request: ExplainRequest): Database | undefined {
 }
 
 export async function explain(request: ExplainRequest): Promise<ExplainAnswer> {
+  // Only the agent's EXPLAIN of a statement that reads (explainable.ts): SQLite's runs on the app's own connection.
+  checkExplain(request.sql, request.vendor === "mariadb" ? "mysql" : request.vendor);
   const database = databaseFor(request);
   if (!database) throw new Error(`The app has queried no ${request.vendor} database it can run EXPLAIN on.`);
   const session = await database.open();

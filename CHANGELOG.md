@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- EXPLAIN of a CTE (`WITH … SELECT …`), with the rule the agent and the
+  other SDKs share: the app checks what the agent asks before it runs it.
+  A CTE that changes data (`WITH gone AS (DELETE … RETURNING id) SELECT …`)
+  and `SELECT … INTO` are refused with the reason, and so is more than one
+  statement. A `FOR UPDATE` or `FOR SHARE` query is explained, not
+  analyzed. EXPLAIN ANALYZE still runs on a connection of its own, in a
+  transaction it always rolls back.
+
 ## 0.11.0 (2026-11-02)
 
 ### Fixed
