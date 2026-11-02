@@ -64,8 +64,8 @@ export function asking(value: unknown): Asked | undefined {
 
 /**
  * Why a trace is profiled: the `profile` setting, a request's X-Tracepanel-Profile header (a person's, or a tool's),
- * the panel's cookie, the header on a call from another app's profiled trace (it carries a traceparent too: a
- * backend's call, the browser's), or the app's own code (profile(), or a root span it marks with tracepanel.profile).
+ * the panel's cookie (or the header the browser SDK sends with it while the panel's Profile is on), the header on a
+ * call from another app's profiled trace (it carries a traceparent too), or the app's own code (profile(), or a root span it marks with tracepanel.profile).
  */
 export type Reason = "setting" | "header" | "cookie" | "parent" | "code";
 
@@ -76,16 +76,26 @@ export interface Ask {
 }
 
 /**
- * What a request asks for: the X-Tracepanel-Profile header's (from another app's profiled trace when a traceparent
- * came with it), else the cookie's the panel's toggle sets; undefined when neither asks.
+ * What a request asks for: the X-Tracepanel-Profile header's, else the cookie's the panel's toggle sets; undefined
+ * when neither asks. The header with a traceparent is a traced caller's: another app's profiled trace ("parent"), or
+ * the page's own call while the panel's Profile is on (the browser SDK sends both), which carries the panel's cookie
+ * too where it goes to the page's origin: the panel's ("cookie").
  */
 export function asks(headers: RequestHeaders): Ask | undefined {
   const fromHeader = asking(headerValue(headers[HEADER])?.trim());
-  if (fromHeader) return { asked: fromHeader, reason: headerValue(headers.traceparent) ? "parent" : "header" };
+  const fromCookie = byCookie(headers);
+  if (fromHeader) {
+    if (!headerValue(headers.traceparent)) return { asked: fromHeader, reason: "header" };
+    return { asked: fromHeader, reason: fromCookie ? "cookie" : "parent" };
+  }
+  return fromCookie ? { asked: fromCookie, reason: "cookie" } : undefined;
+}
+
+/** What the panel's cookie asks for, when the request carries it. */
+function byCookie(headers: RequestHeaders): Asked | undefined {
   const cookies = headerValue(headers.cookie);
   if (cookies?.includes(COOKIE) !== true) return undefined;
-  const fromCookie = asking(parseCookies(cookies).find(([name]) => name === COOKIE)?.[1]);
-  return fromCookie ? { asked: fromCookie, reason: "cookie" } : undefined;
+  return asking(parseCookies(cookies).find(([name]) => name === COOKIE)?.[1]);
 }
 
 /** What a request asks for (asks() without how). */

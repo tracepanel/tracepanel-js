@@ -367,6 +367,22 @@ describe("asking for a profile", () => {
     ]);
   });
 
+  it("takes the page's call while the panel's Profile is on for the panel's: its header and traceparent, and the cookie", () => {
+    const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+    expect([
+      // The browser SDK's call to the page's origin: the header and a traceparent, and the cookie goes along.
+      asks({ "x-tracepanel-profile": "memory", traceparent, cookie: "a=b; tracepanel_profile=memory" }),
+      // Another app's profiled trace calling: no cookie of the panel's.
+      asks({ "x-tracepanel-profile": "1", traceparent, cookie: "a=b" }),
+      asks({ "x-tracepanel-profile": "1", traceparent, cookie: "tracepanel_profile=0" }),
+    ]).toEqual([
+      { asked: "memory", reason: "cookie" },
+      { asked: "1", reason: "parent" },
+      { asked: "1", reason: "parent" },
+    ]);
+  });
+
   it("is offered in the hello while profiling is on, every trace's when TRACEPANEL_PROFILE=1", () => {
     expect(hello(loadConfig({})).capabilities).toEqual(["explain", "request", "profile", "profile_memory"]);
 

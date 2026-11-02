@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A request the page makes while the panel's Profile is on is profiled
+  "by the panel's cookie", as in the other SDKs, not "by its caller": the
+  browser SDK sends `X-Tracepanel-Profile` with a traceparent, and the
+  panel's cookie goes along to the page's origin. The header with a
+  traceparent and no cookie of the panel's stays another app's ask
+  (`parent`).
+
 ## 0.10.0 (2026-10-31)
 
 ### Added
