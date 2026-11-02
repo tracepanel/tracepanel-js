@@ -297,6 +297,28 @@ describe("EXPLAIN QUERY PLAN", () => {
     other.close();
   });
 
+  it("explains a WITH … SELECT, and refuses a CTE that changes data without running it", async () => {
+    const db = shop(new BetterSqlite3(join(dir, "ctes.db")));
+    await request(() => pricesOneByOne(db, [1]));
+
+    const plan = await explain({
+      sql: "EXPLAIN QUERY PLAN WITH cheap AS (SELECT * FROM product WHERE id = ?) SELECT price FROM cheap",
+      params: [1],
+      vendor: "sqlite",
+      database: "ctes.db",
+    });
+    const refused = explain({
+      sql: "EXPLAIN QUERY PLAN WITH gone AS (DELETE FROM product RETURNING id) SELECT * FROM gone",
+      params: [],
+      vendor: "sqlite",
+      database: "ctes.db",
+    });
+
+    expect(plan.rows.map((row) => row[3])).toEqual(["SEARCH product USING INTEGER PRIMARY KEY (rowid=?)"]);
+    await expect(refused).rejects.toThrow("This query changes data (DELETE inside WITH): it isn't explained.");
+    db.close();
+  });
+
   it("explains a database in memory, inside the app's open transaction too", async () => {
     const db = shop(new BetterSqlite3(":memory:"));
     await request(() => pricesOneByOne(db, [2]));

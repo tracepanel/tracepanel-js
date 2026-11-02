@@ -100,26 +100,33 @@ test.skipIf(!POSTGRES)("BEGIN … COMMIT on a real client is a transaction span 
   });
 });
 
-test.skipIf(!POSTGRES)("the console's EXPLAIN runs on the app's database and rolls back what it ran", async () => {
+test.skipIf(!POSTGRES)("the console's EXPLAIN ANALYZE of a CTE runs on the app's database and rolls back", async () => {
   const url = new URL(POSTGRES ?? "postgres://localhost");
+  const where = { server: url.hostname, port: Number(url.port || 5432), database: url.pathname.slice(1) };
+  // A read that writes: a volatile function, called by the CTE ANALYZE runs, adds a row.
+  await client?.query(
+    "CREATE OR REPLACE FUNCTION tracepanel_ghost() RETURNS int VOLATILE LANGUAGE sql AS " +
+      "$$ INSERT INTO tracepanel_books (title) VALUES ('Ghost') RETURNING id $$",
+  );
 
   const answer = await explain({
-    sql: "EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, BUFFERS OFF) DELETE FROM tracepanel_books",
+    sql: "EXPLAIN (ANALYZE, BUFFERS) WITH added AS (SELECT tracepanel_ghost() AS id) SELECT id FROM added",
     params: [],
     vendor: "postgresql",
-    server: url.hostname,
-    port: Number(url.port || 5432),
-    database: url.pathname.slice(1),
+    ...where,
+  });
+  const refused = explain({
+    sql: "EXPLAIN WITH gone AS (DELETE FROM tracepanel_books RETURNING id) SELECT * FROM gone",
+    params: [],
+    vendor: "postgresql",
+    ...where,
   });
 
-  expect(answer).toEqual({
-    columns: ["QUERY PLAN"],
-    rows: [
-      ["Delete on tracepanel_books (actual rows=0.00 loops=1)"],
-      ["  ->  Seq Scan on tracepanel_books (actual rows=1.00 loops=1)"],
-    ],
-  });
+  expect(answer.columns).toEqual(["QUERY PLAN"]);
+  expect(answer.rows.map(String).join("\n")).toMatch(/actual time=.* rows=1\.00 loops=1/);
+  await expect(refused).rejects.toThrow("This query changes data (DELETE inside WITH): it isn't explained.");
 
-  // ANALYZE ran the DELETE, inside the transaction EXPLAIN rolled back.
+  // ANALYZE ran the function, inside the transaction EXPLAIN rolled back: no Ghost.
   expect((await client?.query("SELECT title FROM tracepanel_books"))?.rows).toEqual([{ title: "Dune" }]);
+  await client?.query("DROP FUNCTION tracepanel_ghost()");
 });

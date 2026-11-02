@@ -23,7 +23,7 @@ It runs while you develop, and everything stays on your machine.
 | **Runtimes** | Node.js 20.19 and later, tested in CI on 20.19, 22, 24 and 26. Bun. |
 | **Frameworks** | Express 4.18 and later, Fastify 5, Koa 3 with `@koa/router`, Hono 4.8 and later on Node and on Bun, NestJS on Express, Next.js in its Node.js runtime, Nuxt, and `Bun.serve`. On Bun also any fetch handler, such as Elysia's. Any other server on Node's `node:http` at the request level. |
 | **GraphQL** | GraphQL Yoga and Apollo Server, through their plugins: each request named after its operation, the app's resolvers as steps with their calls under them, resolver errors behind HTTP 200. |
-| **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. SQLite through `better-sqlite3`, `node:sqlite` and `libsql`. Transactions and their savepoints. EXPLAIN on PostgreSQL, MySQL and SQLite. |
+| **Databases** | `pg` and `mysql2`, and so Drizzle, Knex, Sequelize, TypeORM and Prisma's driver adapters, with Prisma's operations as steps. SQLite through `better-sqlite3`, `node:sqlite` and `libsql`. Transactions and their savepoints. EXPLAIN on PostgreSQL, MySQL and SQLite, of a SELECT or a `WITH … SELECT` that changes no data (ANALYZE is rolled back). |
 | **Redis and MongoDB** | `ioredis` and `redis`, and the MongoDB driver, with their own N+1 and duplicates. |
 | **HTTP clients** | `fetch()`, and `node:http` clients such as axios, on Node and on Bun. |
 | **AWS** | The AWS SDK's v3 clients (`@aws-sdk/client-*`): S3 as storage calls, DynamoDB commands with their N+1 and duplicates, SQS and SNS messages, and every other service's calls, with their errors and retries. |
