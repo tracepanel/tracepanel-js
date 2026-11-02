@@ -712,7 +712,9 @@ export class TracepanelProcessor implements SpanProcessor {
     // What EXPLAIN binds back: pg's values, SQLite's; mysql2 writes them into the statement itself.
     const params = Array.isArray(values) ? values : system === "mysql" ? [] : undefined;
     const driver = attrs["tracepanel.db.client"];
-    const namespace = attrs["db.namespace"];
+    // The database's name, as the driver's config has it (pg's, mysql2's; SQLite's file): older instrumentations say
+    // db.name. The alias is the app's name for the connection, and every JavaScript one is the default.
+    const namespace = first(attrs, "db.namespace", "db.name");
     const rows = attrs["db.response.returned_rows"];
     return {
       ...(params ? { "db.params": params } : {}),
@@ -720,7 +722,7 @@ export class TracepanelProcessor implements SpanProcessor {
       "db.system": system,
       "db.vendor": system,
       "db.alias": "default",
-      ...(system === "sqlite" && typeof namespace === "string" ? { "db.namespace": namespace } : {}),
+      ...(typeof namespace === "string" && namespace !== "" ? { "db.namespace": namespace } : {}),
       ...(typeof rows === "number" ? { "db.response.returned_rows": rows } : {}),
       "db.statement": statement(sql),
       "db.fingerprint": fingerprint(sql),

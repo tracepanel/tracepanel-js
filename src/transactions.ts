@@ -38,6 +38,18 @@ interface Open {
 export interface Driver {
   client: string;
   system: string;
+  /** The database a connection is to, as its config names it (db.namespace): none when it doesn't. */
+  namespace?: (connection: Any) => string | null | undefined;
+}
+
+/** A connection's database, as its driver tells it; never in the way of the app's query. */
+function namespaceOf(connection: Any, driver: Driver): string | undefined {
+  try {
+    const name = driver.namespace?.(connection);
+    return typeof name === "string" && name !== "" ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const tracer = trace.getTracer("tracepanel-transactions");
@@ -65,6 +77,7 @@ function open(connection: Any, driver: Driver, savepoint: boolean): Open | undef
   }
   const before = context.active();
   const parent = savepoint ? (opened.at(-1)?.inside ?? before) : before;
+  const namespace = namespaceOf(connection, driver);
   const span = tracer.startSpan(
     `${savepoint ? "savepoint" : "transaction"} default`,
     {
@@ -75,6 +88,7 @@ function open(connection: Any, driver: Driver, savepoint: boolean): Open | undef
         "db.system": driver.system,
         "db.vendor": driver.system,
         "db.alias": "default",
+        ...(namespace ? { "db.namespace": namespace } : {}),
         "db.transaction.savepoint": savepoint,
       },
     },
@@ -239,8 +253,14 @@ export function commonJs(exports: Any): Any {
 /** Nothing to undo: the wrappers stay, and do nothing once no span is active. */
 const keep = (exports: Any) => exports;
 
-const PG = { client: "pg", system: "postgresql" };
-const MYSQL = { client: "mysql2", system: "mysql" };
+// A pg client's database is its own property (the config's, or the user's name when none is given); a mysql2
+// connection's is in its config.
+export const PG: Driver = { client: "pg", system: "postgresql", namespace: (client) => client?.database };
+export const MYSQL: Driver = {
+  client: "mysql2",
+  system: "mysql",
+  namespace: (connection) => connection?.config?.database,
+};
 
 export class TransactionsInstrumentation extends InstrumentationBase {
   constructor() {
