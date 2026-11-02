@@ -13,6 +13,7 @@ import type { NextFunction, Request, Response } from "express";
 import { tapIncoming, tapOf, tapsBody } from "./body.js";
 import type { Attrs } from "./model.js";
 import { hasBody, parsedBody, redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
+import { addedToResponse } from "./response-body.js";
 import { runtime } from "./runtime.js";
 import { expressSession } from "./session.js";
 import { badge, exposedHeaders, inject, Stream, streamablePage } from "./widget.js";
@@ -119,7 +120,8 @@ export function tracepanel() {
       }
       const page = streamablePage((name) => res.getHeader(name));
       const tag = mark(page);
-      if (page && tag) script = new Stream(tag);
+      // The script isn't the app's: its size isn't counted in the page's.
+      if (page && tag) script = new Stream(tag, (bytes) => addedToResponse(res, bytes));
     };
 
     // A handler that writes its headers itself, before its body: the badge's go with them. Headers passed here join
@@ -179,7 +181,12 @@ export function tracepanel() {
       let body = Buffer.concat(chunks);
       const page = String(res.getHeader("content-type") ?? "").includes("text/html");
       const tag = mark(page);
-      if (tag) body = Buffer.from(inject(body.toString("utf8"), tag));
+      if (tag) {
+        const injected = Buffer.from(inject(body.toString("utf8"), tag));
+        // The script isn't the app's: its size isn't counted in the page's.
+        addedToResponse(res, injected.length - body.length);
+        body = injected;
+      }
       if (!res.getHeader("transfer-encoding")) res.setHeader("Content-Length", body.length);
       return end(body, callback as never);
     }) as End;

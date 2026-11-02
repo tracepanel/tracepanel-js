@@ -8,7 +8,8 @@
 // at bodyLimit() characters. A stream (Server-Sent Events, NDJSON, a Node body written in pieces without a
 // Content-Length), a compressed body, a page and its assets, binary content and JSON past MAX_PARSED are recorded by
 // their size only: none of it is kept past what tells that. A fetch Response's pieces don't tell a stream (Bun hands
-// a string's body over in several): only its type does. TRACEPANEL_CAPTURE_BODY=0 records neither.
+// a string's body over in several): only its type does. TRACEPANEL_CAPTURE_BODY=0 records neither. A page's size is
+// the app's own: the widget's script, put in after the app sent the page (Express, Fastify, Koa), isn't counted.
 
 import type { ServerResponse } from "node:http";
 import type { Span } from "@opentelemetry/api";
@@ -53,6 +54,8 @@ export class ResponseTap {
   private keptSize = 0;
   private size = 0;
   private pieces = 0;
+  /** Bytes put into the body on its way out (the widget's script in a page): not the app's. */
+  private added = 0;
   private ended = false;
   /** How many bytes are kept: decided at the first piece, from what the headers say then. */
   private keep: number | undefined;
@@ -78,6 +81,11 @@ export class ResponseTap {
     this.keptSize += copy.length;
   }
 
+  /** Bytes the SDK put into the body (the widget's script in a page): its size is the app's without them. */
+  addedBy(bytes: number): void {
+    this.added += bytes;
+  }
+
   /** The body went out to its end. */
   end(): void {
     this.ended = true;
@@ -90,7 +98,7 @@ export class ResponseTap {
   attrs(): Attrs {
     if (bodyLimit() === 0) return {};
     const sent = this.sent();
-    const found: Attrs = { "http.response.body.size": this.size };
+    const found: Attrs = { "http.response.body.size": Math.max(0, this.size - this.added) };
     const kind = kindOf(sent.contentType);
     if (this.size === 0 || !this.ended || !wholeKind(sent)) return found;
     // In pieces without a declared size: a stream, written as it was made.
@@ -201,6 +209,11 @@ export function tapResponse(res: ServerResponse): ResponseTap {
   } as End;
   (res as ServerResponse & { [TAP]?: ResponseTap })[TAP] = tap;
   return tap;
+}
+
+/** Bytes the SDK put into a Node response's body (the widget's script in a page): not counted in its size. */
+export function addedToResponse(res: ServerResponse, bytes: number): void {
+  if (bytes > 0) (res as ServerResponse & { [TAP]?: ResponseTap })[TAP]?.addedBy(bytes);
 }
 
 /**

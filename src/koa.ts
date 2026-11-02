@@ -13,6 +13,7 @@ import type { Readable } from "node:stream";
 import type { Context, Middleware, Next } from "koa";
 import type { Attrs } from "./model.js";
 import { hasBody, parsedBody, requestAttrs, responseHeaders, searchOf } from "./request.js";
+import { addedToResponse } from "./response-body.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { expressSession } from "./session.js";
 import { inView, statusOf, wasRecorded } from "./view.js";
@@ -130,7 +131,15 @@ export function tracepanel(): Middleware {
     if (marks.cookie) ctx.append("Set-Cookie", marks.cookie);
     if (!page || !marks.script) return;
     // Koa sets the new body's Content-Length, and leaves a stream's out.
-    if (isStream(body)) ctx.body = streamWith(body, marks.script);
-    else ctx.body = inject(Buffer.isBuffer(body) ? body.toString("utf8") : (body as string), marks.script);
+    // The script isn't the app's: its size isn't counted in the page's.
+    const added = (bytes: number) => addedToResponse(ctx.res, bytes);
+    if (isStream(body)) {
+      ctx.body = streamWith(body, marks.script, added);
+      return;
+    }
+    const sent = Buffer.isBuffer(body) ? body.toString("utf8") : (body as string);
+    const injected = inject(sent, marks.script);
+    added(Buffer.byteLength(injected) - Buffer.byteLength(sent));
+    ctx.body = injected;
   };
 }
