@@ -93,6 +93,8 @@ test.skipIf(!POSTGRES)("BEGIN … COMMIT on a real client is a transaction span 
     "db.system": "postgresql",
     "db.vendor": "postgresql",
     "db.alias": "default",
+    // The database's name, from the client's connection (here, the URL's path).
+    "db.namespace": new URL(POSTGRES ?? "postgres://localhost/").pathname.slice(1),
     "db.transaction.savepoint": false,
     "db.transaction.outcome": "commit",
     "code.origin": null,
