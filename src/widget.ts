@@ -159,7 +159,11 @@ export class Stream {
   private seen = 0;
   private done = false;
 
-  constructor(tag: string) {
+  /** `put`: told the script's size once it is in. */
+  constructor(
+    tag: string,
+    private readonly put?: (bytes: number) => void,
+  ) {
     this.tag = Buffer.from(tag);
   }
 
@@ -175,6 +179,7 @@ export class Stream {
     if (found) {
       this.done = true;
       const at = found.index + found[0].length;
+      this.put?.(this.tag.length);
       return Buffer.concat([data.subarray(0, at), this.tag, data.subarray(at)]);
     }
     this.seen += chunk.length;
@@ -198,9 +203,12 @@ export class Stream {
   }
 }
 
-/** A Node stream with the script put into the page as it passes (a Fastify or Koa page streamed). */
-export function streamWith(source: Readable, tag: string): Transform {
-  const script = new Stream(tag);
+/**
+ * A Node stream with the script put into the page as it passes (a Fastify or Koa page streamed). `put`: told the
+ * script's size once it is in.
+ */
+export function streamWith(source: Readable, tag: string, put?: (bytes: number) => void): Transform {
+  const script = new Stream(tag, put);
   const piped = new Transform({
     transform(chunk: Buffer | string, _encoding, done) {
       done(null, script.feed(typeof chunk === "string" ? Buffer.from(chunk) : chunk));

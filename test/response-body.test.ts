@@ -3,7 +3,7 @@
 // its size only, going out piece by piece as it is written, never held; nothing with TRACEPANEL_CAPTURE_BODY=0.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { ApolloServer } from "@apollo/server";
 import { expressMiddleware } from "@as-integrations/express5";
 import { serve } from "@hono/node-server";
@@ -27,6 +27,9 @@ const ACCOUNT = { id: "7", password: "hunter2", owner: { apiKey: "k1", name: "An
 const MASKED = '{"id":"7","password":"********","owner":{"apiKey":"********","name":"Ann"}}';
 const LARGE = "x".repeat(MAX_BODY + 100);
 const EVENTS = ["data: 1\n\n", "data: 2\n\n"];
+// A page: the widget's script goes into it on its way out.
+const PAGE = "<!doctype html><html><head><title>t</title></head><body>x</body></html>";
+const PAGE_PIECES = ["<!doctype html><html><he", "ad><title>t</title></head>", "<body>x</body></html>"];
 
 // A stream's second event waits here until the client has read the first.
 let release: () => void = () => {};
@@ -48,6 +51,13 @@ const node = createServer(async (req, res) => {
   } else if (path.endsWith("/large")) {
     res.setHeader("Content-Type", "text/plain");
     res.end(LARGE);
+  } else if (path.endsWith("/page")) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.end(PAGE);
+  } else if (path.endsWith("/streamed-page")) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    for (const piece of PAGE_PIECES) res.write(piece);
+    res.end();
   } else {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     res.write(EVENTS[0]);
@@ -64,6 +74,14 @@ expressApp.get("/:run/json", (_req, res) => {
 expressApp.get("/:run/large", (_req, res) => {
   res.type("text/plain").send(LARGE);
 });
+expressApp.get("/:run/page", (_req, res) => {
+  res.type("html").send(PAGE);
+});
+expressApp.get("/:run/streamed-page", (_req, res) => {
+  res.type("html");
+  for (const piece of PAGE_PIECES) res.write(piece);
+  res.end();
+});
 expressApp.get("/:run/events", async (_req, res) => {
   res.type("text/event-stream");
   res.write(EVENTS[0]);
@@ -76,6 +94,8 @@ const fastify = Fastify();
 await fastify.register(fastifyPlugin());
 fastify.get("/:run/json", async () => ACCOUNT);
 fastify.get("/:run/large", async (_request, reply) => reply.type("text/plain").send(LARGE));
+fastify.get("/:run/page", async (_request, reply) => reply.type("text/html").send(PAGE));
+fastify.get("/:run/streamed-page", async (_request, reply) => reply.type("text/html").send(Readable.from(PAGE_PIECES)));
 fastify.get("/:run/events", (_request, reply) => {
   const stream = new PassThrough();
   stream.write(EVENTS[0]);
@@ -93,6 +113,14 @@ router.get("/:run/large", (ctx) => {
   ctx.type = "text/plain";
   ctx.body = LARGE;
 });
+router.get("/:run/page", (ctx) => {
+  ctx.type = "html";
+  ctx.body = PAGE;
+});
+router.get("/:run/streamed-page", (ctx) => {
+  ctx.type = "html";
+  ctx.body = Readable.from(PAGE_PIECES);
+});
 router.get("/:run/events", (ctx) => {
   const stream = new PassThrough();
   stream.write(EVENTS[0]);
@@ -108,6 +136,17 @@ const hono = new Hono();
 hono.use(honoMiddleware());
 hono.get("/:run/json", (c) => c.json(ACCOUNT));
 hono.get("/:run/large", (c) => c.text(LARGE));
+hono.get("/:run/page", (c) => c.html(PAGE));
+hono.get("/:run/streamed-page", (c) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const piece of PAGE_PIECES) controller.enqueue(encoder.encode(piece));
+      controller.close();
+    },
+  });
+  return c.body(stream, 200, { "Content-Type": "text/html; charset=utf-8" });
+});
 hono.get("/:run/events", (c) => {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -227,6 +266,24 @@ async function bodiesOff<T>(run: () => Promise<T>): Promise<T> {
 }
 
 describe.each(Object.entries(servers))("%s", (_name, base) => {
+  test("a page is recorded by its own size, as the app sent it: the widget's script put in is not counted", async () => {
+    const { response, trace } = await traced(base, "page");
+    const body = await response.text();
+
+    expect(body.replace(/<script .*?<\/script>/, "")).toBe(PAGE);
+
+    expect(responseBody(await trace())).toEqual({ "http.response.body.size": PAGE.length });
+  });
+
+  test("a page streamed is recorded by its own size too, the script put in as it passed not counted", async () => {
+    const { response, trace } = await traced(base, "streamed-page");
+    const body = await response.text();
+
+    expect(body.replace(/<script .*?<\/script>/, "")).toBe(PAGE);
+
+    expect(responseBody(await trace())).toEqual({ "http.response.body.size": PAGE.length });
+  });
+
   test("JSON sent whole is recorded with its size, its secrets masked", async () => {
     const { response, trace } = await traced(base, "json");
 

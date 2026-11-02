@@ -19,6 +19,7 @@ import type {
 } from "fastify";
 import type { Attrs } from "./model.js";
 import { hasBody, parsedBody, requestAttrs, responseHeaders, searchOf } from "./request.js";
+import { addedToResponse } from "./response-body.js";
 import { runtime } from "./runtime.js";
 import { expressSession } from "./session.js";
 import { madeAt } from "./stack.js";
@@ -100,8 +101,12 @@ export function tracepanel(): FastifyPluginAsync {
       // Fastify keeps each Set-Cookie it is given.
       if (marks.cookie) reply.header("set-cookie", marks.cookie);
       if (!page || !marks.script) return payload;
-      if (isStream(payload)) return streamWith(payload, marks.script);
-      const body = inject(Buffer.isBuffer(payload) ? payload.toString("utf8") : (payload as string), marks.script);
+      // The script isn't the app's: its size isn't counted in the page's.
+      const added = (bytes: number) => addedToResponse(reply.raw, bytes);
+      if (isStream(payload)) return streamWith(payload, marks.script, added);
+      const sent = Buffer.isBuffer(payload) ? payload.toString("utf8") : (payload as string);
+      const body = inject(sent, marks.script);
+      added(Buffer.byteLength(body) - Buffer.byteLength(sent));
       if (header("content-length") !== undefined) reply.header("content-length", Buffer.byteLength(body));
       return body;
     });

@@ -12,8 +12,9 @@
   the limit is cut there and marked `http.response.body.truncated`. A
   stream (Server-Sent Events, NDJSON, a body written in pieces without a
   Content-Length), a compressed body, a page and its assets, binary
-  content and JSON past 4 MiB are recorded by their size only. The body
-  passes a tap on its way out: nothing waits for it, and the client gets
+  content and JSON past 4 MiB are recorded by their size only; a page's
+  size is the app's own, without the widget's script put into it. The
+  body passes a tap on its way out: nothing waits for it, and the client gets
   it as it would have. Node's HTTP server, Express, Fastify, Koa, Next.js
   route handlers, Hono, Bun.serve, GraphQL Yoga and Apollo Server.
 - `TRACEPANEL_CAPTURE_BODY=0` stops keeping the bodies of requests and of
