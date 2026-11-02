@@ -7,8 +7,8 @@
 
 import http, { type IncomingMessage, ServerResponse } from "node:http";
 import https from "node:https";
-import { tapIncoming, tapOf } from "./body.js";
-import { hasBody, redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
+import { incomingOperation, tapIncoming, tapOf, tapsBody } from "./body.js";
+import { redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
 import type { Runtime } from "./runtime.js";
 import { exposedHeaders } from "./widget.js";
 
@@ -24,7 +24,7 @@ function tapBodies(tracepanel: Runtime): void {
     const emit = server.emit;
     server.emit = function (this: http.Server, event: string | symbol, ...args: unknown[]) {
       const req = args[0] as IncomingMessage | undefined;
-      if (event === "request" && req && tracepanel.config.captureRequest && hasBody(req.headers) && !tapOf(req)) {
+      if (event === "request" && req && tapsBody(tracepanel.config.captureRequest, req.headers) && !tapOf(req)) {
         tapIncoming(req);
       }
       return emit.call(this, event, ...args);
@@ -46,6 +46,8 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
       // Headers passed to writeHead itself (an object) count too: CORS middleware often sets them there.
       const given = [args[1], args[2]].find((arg) => arg !== null && typeof arg === "object" && !Array.isArray(arg));
       const passed = (given ?? {}) as Record<string, unknown>;
+      const read = this.req ? incomingOperation(this.req) : undefined;
+      if (read) tracepanel.processor.readOperation(read, { method, url });
       if (tracepanel.config.captureRequest && this.req) {
         // Before the badge: a response sent outside the request's context finds its trace by the URL until then.
         tracepanel.processor.setTraceAttrs(

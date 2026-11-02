@@ -11,7 +11,7 @@
 // (body.ts), and Tracepanel never reads it for the app.
 
 import { propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
-import { tapRequest } from "./body.js";
+import { fetchOperation, tapRequest, tapsFetchBody } from "./body.js";
 import { askAttributes, asks } from "./profile.js";
 import { MARKED, marked } from "./respond.js";
 import { start } from "./setup.js";
@@ -53,11 +53,13 @@ export function withTracepanel<H extends Handler>(handler: H, route?: string, on
       keys: (headers) => [...headers.keys()],
     });
     const options = { kind: SpanKind.SERVER, attributes };
-    const body = tracepanel.config.captureRequest ? tapRequest(request) : undefined;
+    const body = tapsFetchBody(tracepanel.config.captureRequest, request) ? tapRequest(request) : undefined;
+    const operation = fetchOperation(request, body);
     // Its response is marked here: Hono's middleware under this leaves it.
     (request as Request & { [MARKED]?: true })[MARKED] = true;
     return tracer.startActiveSpan(`${request.method}`, options, caller, async (span) => {
       tracepanel.processor.setFramework("Bun.serve");
+      if (operation) tracepanel.processor.readOperation(operation);
       // A page streamed through the widget's script: its request ends with the body.
       let streamed: Promise<void> | undefined;
       try {

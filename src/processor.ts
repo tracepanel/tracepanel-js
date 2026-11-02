@@ -105,6 +105,8 @@ interface Building {
   lastOrm: string | null;
   /** The trace's profile while it runs, when it is profiled. */
   recording?: Recording | undefined;
+  /** Reads the GraphQL operation its request carried (readOperation()). */
+  operation?: (() => Attrs | undefined) | undefined;
   /**
    * What its request asked for, when that profiles it: its calls to other apps ask the same (propagation.ts). Not
    * set for a trace the `profile` setting profiles: each app's own setting says whether it profiles every trace.
@@ -436,6 +438,7 @@ export class TracepanelProcessor implements SpanProcessor {
     if (!building) return undefined;
     // A response's headers took it: another response to the same URL is another request's.
     if (request) building.answered = true;
+    operationOf(building);
     return {
       id: building.trace.id,
       name: nameOf(building.trace),
@@ -532,6 +535,19 @@ export class TracepanelProcessor implements SpanProcessor {
   setTraceAttrs(attrs: Attrs, request?: { method: string; url: string }): void {
     const building = this.current()?.building ?? (request ? this.waiting(request) : undefined);
     if (building) Object.assign(building.trace.attrs, attrs);
+  }
+
+  /**
+   * Where the request's GraphQL operation is read from (its query string, its body as it passes): read as its response
+   * goes out and as its trace ends, whatever the answer, for a server that answered before the operation ran (a 503).
+   * `at`: the OTel id of the request's root span, or its method and URL as setTraceAttrs() finds it.
+   */
+  readOperation(read: () => Attrs | undefined, at?: string | { method: string; url: string }): void {
+    const building =
+      typeof at === "string" ? this.owner.get(at) : (this.current()?.building ?? (at ? this.waiting(at) : undefined));
+    if (!building) return;
+    const before = building.operation;
+    building.operation = before ? () => before() ?? read() : read;
   }
 
   /** The framework the active request ran on, as the panel shows it. */
@@ -768,6 +784,7 @@ export class TracepanelProcessor implements SpanProcessor {
       // Nest throws NotFoundException and the like to answer 404, 422…: an answer, not an error.
       tr.errors = tr.errors.filter((error) => !building.nestViews.has(error.span_id ?? ""));
     }
+    operationOf(building);
     tr.name = nameOf(tr) ?? `${method} ${typeof route === "string" && route ? route : path}`;
     tr.start = startUs(root);
     tr.duration = durationUs(root);
@@ -833,10 +850,30 @@ export interface Timing {
   startedMs: number;
 }
 
-/** A GraphQL request's name: one URL serves every operation, so the operation names it (`GraphQL query Books`). */
+/**
+ * A GraphQL request's name: one URL serves every operation, so the operation names it (`GraphQL query Books`). The
+ * one the GraphQL server's plugin ran, else the one the request carried (readOperation()).
+ */
 function nameOf(trace: Trace): string | undefined {
   const operation = trace.attrs["graphql.operation"];
-  return typeof operation === "string" ? `GraphQL ${operation}` : undefined;
+  if (typeof operation === "string") return `GraphQL ${operation}`;
+  const type = trace.attrs["graphql.operation.type"];
+  const name = trace.attrs["graphql.operation.name"];
+  return typeof type === "string" && typeof name === "string" ? `GraphQL ${type} ${name}` : undefined;
+}
+
+/** The operation the request carried, into its trace's attributes, unless its GraphQL server's plugin named one. */
+function operationOf(building: Building): void {
+  const attrs = building.trace.attrs;
+  if (!building.operation || attrs["graphql.operation"] !== undefined || attrs["graphql.operation.name"] != null) {
+    return;
+  }
+  try {
+    const found = building.operation();
+    if (found) Object.assign(attrs, found);
+  } catch {
+    // A body that can't be read names no operation.
+  }
 }
 
 function queryOrigin(parentContext: Context): QueryOrigin | undefined {

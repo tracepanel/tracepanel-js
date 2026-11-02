@@ -32,6 +32,7 @@ const processor = {
   framework: () => "Nuxt",
   setFramework: () => {},
   setRoute: () => {},
+  readOperation: () => {},
   setTraceAttrs: (attrs: Attrs, request: { url: string }) =>
     recorded.set(request.url, { ...recorded.get(request.url), ...attrs }),
 } as unknown as TracepanelProcessor;

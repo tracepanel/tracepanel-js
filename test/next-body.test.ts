@@ -20,6 +20,7 @@ import type { Runtime } from "../src/runtime.js";
 const recorded = new Map<string, Attrs>();
 const processor = {
   framework: () => "Next.js",
+  readOperation: () => {},
   setTraceAttrs: (attrs: Attrs, request: { url: string }) => recorded.set(request.url, attrs),
 } as unknown as TracepanelProcessor;
 const tracepanel: Runtime = {
