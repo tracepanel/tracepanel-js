@@ -6,6 +6,17 @@
 
 - A pg or mysql2 statement shows its database (`db.namespace`) again,
   and a transaction span names its connection's database too.
+- A GraphQL request keeps its operation whatever its answer: a server
+  that answered before its GraphQL server ran (a 503, a gateway's
+  refusal), or failed, or never answered. The SDK reads the operation's
+  type and name from what the request sent (a POST's JSON `operationName`
+  and its document's first operation, an `application/graphql` document,
+  a GET's `query` parameter) and records them as `graphql.operation.type`
+  and `graphql.operation.name`, on the server's trace, named
+  `GraphQL query Authors` after them, and on the browser's `fetch()` and
+  XMLHttpRequest calls. Only a body of up to 100,000 bytes is read for
+  it, and only the operation is kept: with the request's body off, the
+  body is not recorded.
 
 ### Added
 

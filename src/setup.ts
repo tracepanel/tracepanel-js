@@ -18,6 +18,7 @@ import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { register as registerSyncHooks, supportsSyncHooks } from "import-in-the-middle/register-hooks.mjs";
 import { awsInstrumentation } from "./aws.js";
+import { operationHook } from "./body.js";
 import { BullMQInstrumentation } from "./bullmq.js";
 import { mongoStatement } from "./calls.js";
 import { captureConsole } from "./console.js";
@@ -133,6 +134,8 @@ export function start(options: Options = {}): Runtime | undefined {
       ignoreIncomingRequestHook: (request) =>
         options.httpServer === false ||
         (request.method === "OPTIONS" && request.headers["access-control-request-method"] !== undefined),
+      // A GraphQL request's operation, whatever the answer: one before the operation ran too (a 503).
+      requestHook: operationHook(tracepanel),
       // What a request asks to be profiled for says so on its span, as it starts.
       startIncomingSpanHook: (request) => {
         return askAttributes(

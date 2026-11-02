@@ -10,7 +10,7 @@
 
 import type { OutgoingHttpHeaders } from "node:http";
 import type { NextFunction, Request, Response } from "express";
-import { tapIncoming, tapOf } from "./body.js";
+import { tapIncoming, tapOf, tapsBody } from "./body.js";
 import type { Attrs } from "./model.js";
 import { hasBody, parsedBody, redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
 import { runtime } from "./runtime.js";
@@ -68,7 +68,8 @@ export function tracepanel() {
     }
     tp.processor.setFramework("Express");
     // A handler may read the body from the stream itself: its pieces pass the tap on their way.
-    if (tp.config.captureRequest && hasBody(req.headers) && !req.readableEnded && !tapOf(req)) tapIncoming(req);
+    // Its GraphQL operation is read from it too (body.ts).
+    if (tapsBody(tp.config.captureRequest, req.headers) && !req.readableEnded && !tapOf(req)) tapIncoming(req);
     const startedMs = performance.now();
     const chunks: Buffer[] = [];
     const write = res.write.bind(res) as Write;

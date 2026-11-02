@@ -8,9 +8,12 @@
 // counted, never kept. JSON or a URL-encoded form past MAX_BODY isn't recorded: its secrets can't be masked from a
 // part of it. Text past it is cut.
 
-import type { IncomingMessage } from "node:http";
+import type { ClientRequest, IncomingMessage } from "node:http";
+import type { Span } from "@opentelemetry/api";
+import { GRAPHQL_MAX, type GraphqlOperation, graphqlOperationOfBody, graphqlOperationOfQuery } from "./browser.js";
 import type { Attrs } from "./model.js";
-import { cut, formText, headerValue, kindOf, MAX_BODY, readBody } from "./request.js";
+import { cut, formText, hasBody, headerValue, kindOf, MAX_BODY, type RequestHeaders, readBody } from "./request.js";
+import type { Runtime } from "./runtime.js";
 
 const TAP = Symbol.for("tracepanel.body");
 /** How long a part's headers may be before a form isn't read as one. */
@@ -139,16 +142,39 @@ function boundaryOf(contentType: string): string | undefined {
   return match?.[1] ?? match?.[2];
 }
 
+/**
+ * Whether a request's body may carry a GraphQL operation (JSON, or a document as `application/graphql`) small enough
+ * to read for it. Its body is tapped for that whether or not bodies are recorded: only its start is kept, up to
+ * GRAPHQL_MAX, and only its operation's type and name are recorded from it.
+ */
+export function mayCarryOperation(contentType: string, length: string | undefined): boolean {
+  const kind = kindOf(contentType);
+  if (!(kind === "application/json" || kind.endsWith("+json") || kind === "application/graphql")) return false;
+  return length === undefined || length === "" || Number(length) <= GRAPHQL_MAX;
+}
+
+/** Whether a Node request's body is tapped: it is recorded, or it may carry a GraphQL operation. */
+export function tapsBody(captureRequest: boolean, requested: RequestHeaders): boolean {
+  if (!hasBody(requested)) return false;
+  return (
+    captureRequest ||
+    mayCarryOperation(headerValue(requested["content-type"]) ?? "", headerValue(requested["content-length"]))
+  );
+}
+
 /** What the app read of a request's body, kept as it passed: its start, its size, and whether it read it all. */
 export class BodyTap {
   private readonly kept: Buffer[] = [];
   private size = 0;
   private ended = false;
   private readonly form: Multipart | undefined;
+  /** How many bytes are kept: a byte past what a body or an operation is read from, to know it was cut. */
+  private readonly keep: number;
 
   constructor(private readonly contentType: string) {
     const boundary = kindOf(contentType) === "multipart/form-data" ? boundaryOf(contentType) : undefined;
     this.form = boundary ? new Multipart(boundary) : undefined;
+    this.keep = (mayCarryOperation(contentType, undefined) ? Math.max(MAX_BODY, GRAPHQL_MAX) : MAX_BODY) + 1;
   }
 
   /** A piece of the body on its way to the app. */
@@ -159,7 +185,7 @@ export class BodyTap {
     if (!piece || piece.length === 0) return;
     if (this.form) this.form.feed(piece);
     // Kept up to the limit, and a byte past it to know it was cut; never the rest of an upload.
-    else if (this.size <= MAX_BODY) this.kept.push(Buffer.from(piece.subarray(0, MAX_BODY + 1 - this.size)));
+    else if (this.size < this.keep) this.kept.push(Buffer.from(piece.subarray(0, this.keep - this.size)));
     this.size += piece.length;
   }
 
@@ -176,12 +202,67 @@ export class BodyTap {
       if (!text) return {};
       return this.form.overflow ? { ...cut(text), "http.request.body.truncated": true } : cut(text);
     }
-    const data = Buffer.concat(this.kept);
+    const all = Buffer.concat(this.kept);
+    const data = all.length > MAX_BODY + 1 ? all.subarray(0, MAX_BODY + 1) : all;
     const found = readBody(this.contentType, data, this.ended && this.size <= MAX_BODY);
     // Its characters more than one byte each, the body was cut before MAX_BODY characters.
     if ("http.request.body" in found && this.size > data.length) found["http.request.body.truncated"] = true;
     return found;
   }
+
+  /**
+   * The GraphQL operation the body carried, once it all passed: the app read it, or Node let it go after the response
+   * (a request answered before the app read it, a 503). None for a body cut at GRAPHQL_MAX.
+   */
+  operation(): GraphqlOperation | undefined {
+    if (this.form || !this.ended || this.size >= this.keep) return undefined;
+    return graphqlOperationOfBody(Buffer.concat(this.kept).toString("utf8"), this.contentType);
+  }
+}
+
+/** A Node request's GraphQL operation as it is known at the time: its query string's (GET), its body's (tapped). */
+export function incomingOperation(req: IncomingMessage): (() => GraphqlOperation | undefined) | undefined {
+  const url = req.url ?? "/";
+  const at = url.indexOf("?");
+  if (req.method === "GET") {
+    return at >= 0 && url.includes("query=", at) ? () => graphqlOperationOfQuery(url.slice(at)) : undefined;
+  }
+  const tap = tapOf(req);
+  return tap ? () => tap.operation() : undefined;
+}
+
+/**
+ * Node's HTTP server instrumentation's hook, as each request starts: its body is tapped (before the app reads it) when
+ * it may carry a GraphQL operation, and its trace reads the operation from it, or from its query string.
+ */
+export function operationHook(tracepanel: Runtime): (span: Span, request: ClientRequest | IncomingMessage) => void {
+  return (span, request) => {
+    // An incoming request has its headers as they came; an outgoing one (a ClientRequest) has none.
+    if (!("headers" in request)) return;
+    if (!tapOf(request) && tapsBody(tracepanel.config.captureRequest, request.headers)) tapIncoming(request);
+    const read = incomingOperation(request);
+    if (read) tracepanel.processor.readOperation(read, span.spanContext().spanId);
+  };
+}
+
+/** A fetch Request's GraphQL operation, as incomingOperation() reads a Node request's. */
+export function fetchOperation(
+  request: Request,
+  tap: BodyTap | undefined,
+): (() => GraphqlOperation | undefined) | undefined {
+  if (request.method === "GET") {
+    const search = new URL(request.url).search;
+    return search.includes("query=") ? () => graphqlOperationOfQuery(search) : undefined;
+  }
+  return tap ? () => tap.operation() : undefined;
+}
+
+/** Whether a fetch Request's body is tapped, as tapsBody() tells a Node request's. */
+export function tapsFetchBody(captureRequest: boolean, request: Request): boolean {
+  return (
+    captureRequest ||
+    mayCarryOperation(request.headers.get("content-type") ?? "", request.headers.get("content-length") ?? undefined)
+  );
 }
 
 function toBuffer(chunk: unknown): Buffer | undefined {

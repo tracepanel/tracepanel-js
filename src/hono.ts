@@ -11,7 +11,7 @@
 
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { matchedRoutes } from "hono/route";
-import { tapRequest } from "./body.js";
+import { fetchOperation, tapRequest, tapsFetchBody } from "./body.js";
 import { MARKED, marked } from "./respond.js";
 import { runtime } from "./runtime.js";
 import { inView, recordError, wasRecorded } from "./view.js";
@@ -39,7 +39,9 @@ export function tracepanel(): MiddlewareHandler {
     const startedMs = performance.now();
     const request = c.req.raw;
     const marking = !(request as Request & { [MARKED]?: true })[MARKED];
-    const body = marking && tp.config.captureRequest ? tapRequest(request) : undefined;
+    const body = marking && tapsFetchBody(tp.config.captureRequest, request) ? tapRequest(request) : undefined;
+    const operation = marking ? fetchOperation(request, body) : undefined;
+    if (operation) tp.processor.readOperation(operation);
     const route = handlerRoute(c);
     if (route) {
       tp.processor.setRoute(route);

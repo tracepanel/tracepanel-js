@@ -28,6 +28,7 @@ const processor = {
   setTraceAttrs: (attrs: Attrs) => {
     recorded = attrs;
   },
+  readOperation: () => {},
 } as unknown as TracepanelProcessor;
 const tracepanel: Runtime = {
   config: { ...loadConfig({}), enabled: true },

@@ -12,6 +12,7 @@ import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import type { ConsoleUrl, Starter } from "../src/agent.js";
+import { operationHook } from "../src/body.js";
 import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
@@ -47,7 +48,7 @@ export const tracepanel: Runtime = {
 
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 new NodeTracerProvider({ spanProcessors: [processor] }).register();
-registerInstrumentations({ instrumentations: [new HttpInstrumentation()] });
+registerInstrumentations({ instrumentations: [new HttpInstrumentation({ requestHook: operationHook(tracepanel) })] });
 // Loaded through require, node:http is patched: its server's prototype is the one ES modules import too.
 createRequire(import.meta.url)("node:http");
 
@@ -84,6 +85,16 @@ export async function traceOf(response: Response | { headers: IncomingHttpHeader
     await new Promise((done) => setTimeout(done, 10));
   }
   throw new Error(`no trace ${id}`);
+}
+
+/** The first trace kept that matches, once its last spans are in: one of a request that got no answer. */
+export async function traceWhere(match: (trace: Trace) => boolean): Promise<Trace> {
+  for (let waited = 0; waited < 2000; waited += 10) {
+    const found = traces.find(match);
+    if (found) return found;
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  throw new Error("no such trace");
 }
 
 /** The spans of a trace as kind, name and the attributes asked for, root first, each under its parent. */

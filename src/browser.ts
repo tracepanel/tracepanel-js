@@ -210,6 +210,53 @@ function safeUrl(raw: string): URL | undefined {
   }
 }
 
+// A GraphQL request's operation, from what it sends: `{"query": …, "operationName": …}` as JSON (POST), the document
+// itself (application/graphql), or the `query` and `operationName` parameters (GET). Its type is the document's first
+// operation's, its name the one the client sent, else that operation's own; an anonymous one has none. The agent and
+// its widget read a body by the same rule. The server SDK reads a request's by this one too: browser.js imports
+// nothing, so it lives here.
+
+const OPERATION = /^\s*(query|mutation|subscription)\s+([_A-Za-z][_0-9A-Za-z]*)/;
+
+/** The largest body read for its operation, in characters. */
+export const GRAPHQL_MAX = 100_000;
+
+/** A GraphQL operation's type and name, as OpenTelemetry's conventions name them. */
+export type GraphqlOperation = {
+  "graphql.operation.type": string;
+  "graphql.operation.name": string;
+};
+
+/** A named operation, from its document and the operationName the client sent with it. */
+export function graphqlOperation(query: unknown, operationName?: unknown): GraphqlOperation | undefined {
+  const match = typeof query === "string" ? OPERATION.exec(query) : null;
+  if (!match?.[1] || !match[2]) return undefined;
+  const name = typeof operationName === "string" && operationName ? operationName : match[2];
+  return { "graphql.operation.type": match[1], "graphql.operation.name": name };
+}
+
+/** From a request's body: JSON with a query in it, or a document (`application/graphql`). */
+export function graphqlOperationOfBody(body: unknown, contentType = ""): GraphqlOperation | undefined {
+  if (typeof body !== "string" || body.length > GRAPHQL_MAX) return undefined;
+  if (contentType.split(";", 1)[0]?.trim().toLowerCase() === "application/graphql") return graphqlOperation(body);
+  if (!body.includes('"query"')) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const { query, operationName } = parsed as { query?: unknown; operationName?: unknown };
+    return graphqlOperation(query, operationName);
+  } catch {
+    return undefined;
+  }
+}
+
+/** From a GET request's query string (`?query=query+Books…`). */
+export function graphqlOperationOfQuery(search: string): GraphqlOperation | undefined {
+  if (!search.includes("query=") || search.length > GRAPHQL_MAX) return undefined;
+  const params = new URLSearchParams(search);
+  return graphqlOperation(params.get("query"), params.get("operationName"));
+}
+
 /** What the panel's Profile toggle asks for now: "1", "memory", or nothing while it is off. */
 function profileAsked(): string | undefined {
   let cookies = "";
@@ -467,6 +514,8 @@ export function record(options: BrowserOptions = {}): void {
   function call(
     method: string,
     raw: string,
+    body?: unknown,
+    contentType?: string,
   ): {
     /** Answered with `status`, or failed with no answer: `failure` names why (TypeError, AbortError, timeout). */
     finish(status: number, failure?: string): void;
@@ -494,6 +543,10 @@ export function record(options: BrowserOptions = {}): void {
         "server.address": url.hostname,
         "server.port": Number(url.port) || (url.protocol === "https:" ? 443 : 80),
         "w3c.span_id": spanId,
+        // A GraphQL request's operation, whatever its answer (none, an error, a 503 before it ran).
+        ...(method.toUpperCase() === "GET"
+          ? graphqlOperationOfQuery(url.search)
+          : graphqlOperationOfBody(body, contentType)),
       },
     };
     if (current.trace.spans.length < MAX_SPANS) current.trace.spans.push(span);
@@ -521,7 +574,9 @@ export function record(options: BrowserOptions = {}): void {
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
-    const out = call(request.method, request.url);
+    // The body as the app passed it: a string is read for a GraphQL operation, a stream never.
+    const sent = init?.body ?? undefined;
+    const out = call(request.method, request.url, sent, request.headers.get("content-type") ?? undefined);
     const headers = new Headers(request.headers);
     if (out.traceparent && !headers.has("traceparent")) headers.set("traceparent", out.traceparent);
     if (out.profile && !headers.has(PROFILE_HEADER)) headers.set(PROFILE_HEADER, out.profile);
@@ -542,7 +597,13 @@ export function record(options: BrowserOptions = {}): void {
 
   const open = XMLHttpRequest.prototype.open;
   const sendXhr = XMLHttpRequest.prototype.send;
-  const calls = new WeakMap<XMLHttpRequest, { method: string; url: string }>();
+  const calls = new WeakMap<XMLHttpRequest, { method: string; url: string; contentType?: string }>();
+  const setRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+  XMLHttpRequest.prototype.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
+    const target = calls.get(this);
+    if (target && name.toLowerCase() === "content-type") target.contentType = value;
+    return setRequestHeader.call(this, name, value);
+  };
   XMLHttpRequest.prototype.open = function (
     this: XMLHttpRequest,
     method: string,
@@ -555,7 +616,7 @@ export function record(options: BrowserOptions = {}): void {
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const target = calls.get(this);
     if (target) {
-      const out = call(target.method, target.url);
+      const out = call(target.method, target.url, body, target.contentType);
       if (out.traceparent) this.setRequestHeader("traceparent", out.traceparent);
       if (out.profile) this.setRequestHeader(PROFILE_HEADER, out.profile);
       if (out.page) Object.defineProperty(this, PAGE, { value: out.page, configurable: true });

@@ -57,6 +57,7 @@ beforeAll(() => {
     requests.push(request);
     if (request.url.includes("down")) throw new TypeError("Failed to fetch");
     if (request.url.includes("slow")) await new Promise<void>((resolve) => (answerSlow = resolve));
+    if (request.url.includes("unavailable")) return new Response("{}", { status: 503 });
     return new Response("{}", { status: request.url.includes("boom") ? 500 : 200 });
   };
   const opened = new WeakMap<XMLHttpRequest, { url: string; headers: Record<string, string> }>();
@@ -394,4 +395,49 @@ test("a view that ends with a call still open closes it as unfinished, then igno
   await new Promise((resolve) => setTimeout(resolve, 1200));
 
   expect(sent.filter((trace) => trace.name === "/orders")).toHaveLength(1);
+});
+
+test("a GraphQL call carries its operation whatever its answer: a 503, none, a GET's, an XMLHttpRequest's", async () => {
+  const json = { "Content-Type": "application/json" };
+  const element = document.createElement("button");
+  element.textContent = "GraphQL";
+  element.addEventListener("click", () => {
+    const authors = JSON.stringify({ operationName: "Authors", query: "query Authors { authors { id } }" });
+    void fetch("/graphql-unavailable", { method: "POST", headers: json, body: authors });
+    const review = JSON.stringify({ query: "mutation AddReview { addReview { id } }" });
+    void fetch("/graphql-down", { method: "POST", headers: json, body: review }).catch(() => undefined);
+    void fetch(`/graphql?query=${encodeURIComponent("query Books { books { id } }")}`);
+    void fetch("/api/search", { method: "POST", headers: json, body: JSON.stringify({ query: "dune" }) });
+    const request = new XMLHttpRequest();
+    request.open("POST", "/graphql-xhr");
+    request.setRequestHeader("Content-Type", "application/json");
+    request.send(JSON.stringify({ query: "subscription OnReview { reviewAdded { id } }" }));
+  });
+  document.body.append(element);
+  element.click();
+  const action = await sentTrace('/orders/1 › click "GraphQL"');
+  const operation = (url: string) => {
+    const { attrs } = callTo(action, url);
+    return [attrs["graphql.operation.type"], attrs["graphql.operation.name"]];
+  };
+
+  expect(callTo(action, "http://app.test/graphql-unavailable")).toMatchObject({
+    status: "error",
+    attrs: {
+      "http.request.method": "POST",
+      "http.response.status_code": 503,
+      "graphql.operation.type": "query",
+      "graphql.operation.name": "Authors",
+    },
+  });
+
+  expect(operation("http://app.test/graphql-down")).toEqual(["mutation", "AddReview"]);
+  expect(callTo(action, "http://app.test/graphql-down").attrs["error.type"]).toBe("TypeError");
+
+  expect(operation(`http://app.test/graphql?query=${encodeURIComponent("query Books { books { id } }")}`)).toEqual([
+    "query",
+    "Books",
+  ]);
+  expect(operation("http://app.test/graphql-xhr")).toEqual(["subscription", "OnReview"]);
+  expect(operation("http://app.test/api/search")).toEqual([undefined, undefined]);
 });
