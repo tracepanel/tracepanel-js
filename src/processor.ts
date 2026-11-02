@@ -107,6 +107,8 @@ interface Building {
   recording?: Recording | undefined;
   /** Reads the GraphQL operation its request carried (readOperation()). */
   operation?: (() => Attrs | undefined) | undefined;
+  /** Reads its response's body as it went out (readResponse()). */
+  response?: (() => Attrs) | undefined;
   /**
    * What its request asked for, when that profiles it: its calls to other apps ask the same (propagation.ts). Not
    * set for a trace the `profile` setting profiles: each app's own setting says whether it profiles every trace.
@@ -550,6 +552,16 @@ export class TracepanelProcessor implements SpanProcessor {
     building.operation = before ? () => before() ?? read() : read;
   }
 
+  /**
+   * Where the request's response body is read from as it went out (response-body.ts): read as its trace ends, the body
+   * sent by then. The last one given wins: the framework's, nearer the app than the server's. `at`: as readOperation's.
+   */
+  readResponse(read: () => Attrs, at?: string | { method: string; url: string }): void {
+    const building =
+      typeof at === "string" ? this.owner.get(at) : (this.current()?.building ?? (at ? this.waiting(at) : undefined));
+    if (building) building.response = read;
+  }
+
   /** The framework the active request ran on, as the panel shows it. */
   framework(): string | undefined {
     return this.current()?.building.framework;
@@ -785,6 +797,7 @@ export class TracepanelProcessor implements SpanProcessor {
       tr.errors = tr.errors.filter((error) => !building.nestViews.has(error.span_id ?? ""));
     }
     operationOf(building);
+    responseOf(building);
     tr.name = nameOf(tr) ?? `${method} ${typeof route === "string" && route ? route : path}`;
     tr.start = startUs(root);
     tr.duration = durationUs(root);
@@ -860,6 +873,15 @@ function nameOf(trace: Trace): string | undefined {
   const type = trace.attrs["graphql.operation.type"];
   const name = trace.attrs["graphql.operation.name"];
   return typeof type === "string" && typeof name === "string" ? `GraphQL ${type} ${name}` : undefined;
+}
+
+/** The response's body, into its trace's attributes. */
+function responseOf(building: Building): void {
+  try {
+    if (building.response) Object.assign(building.trace.attrs, building.response());
+  } catch {
+    // A body that can't be read is not recorded.
+  }
 }
 
 /** The operation the request carried, into its trace's attributes, unless its GraphQL server's plugin named one. */

@@ -4,6 +4,7 @@ import { ConsoleUrl, Sender, Starter } from "./agent.js";
 import type { BrowserOptions } from "./browser.js";
 import { type Config, loadConfig } from "./config.js";
 import { TracepanelProcessor } from "./processor.js";
+import { limitBodies } from "./request.js";
 import { type Badge, type BadgeRequest, badge } from "./widget.js";
 
 export interface Runtime {
@@ -32,6 +33,7 @@ export function runtime(): Runtime | undefined {
   if (holder[KEY]) return holder[KEY];
   const config = loadConfig();
   if (!config.enabled) return undefined;
+  limitBodies(config);
   const starter = new Starter(config.storeDir);
   const processor = new TracepanelProcessor(config, new Sender(config, starter));
   const made: Runtime = {

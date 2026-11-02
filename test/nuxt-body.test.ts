@@ -30,6 +30,7 @@ const KEY = Symbol.for("tracepanel.runtime");
 const recorded = new Map<string, Attrs>();
 const processor = {
   framework: () => "Nuxt",
+  readResponse: () => {},
   setFramework: () => {},
   setRoute: () => {},
   readOperation: () => {},

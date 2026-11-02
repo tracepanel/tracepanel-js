@@ -54,3 +54,22 @@ describe("thresholds", () => {
     });
   });
 });
+
+describe("bodies", () => {
+  it("are kept up to 64 KiB by default", () => {
+    const config = loadConfig({});
+
+    expect([config.captureBody, config.maxBodyKb]).toEqual([true, 64]);
+  });
+
+  it("follow TRACEPANEL_CAPTURE_BODY and TRACEPANEL_MAX_BODY_KB, as the Python SDK's settings", () => {
+    const config = loadConfig({ TRACEPANEL_CAPTURE_BODY: "0", TRACEPANEL_MAX_BODY_KB: "8" });
+
+    expect([config.captureBody, config.maxBodyKb]).toEqual([false, 8]);
+  });
+
+  it("keep the default for a size that isn't one", () => {
+    expect(loadConfig({ TRACEPANEL_MAX_BODY_KB: "-1" }).maxBodyKb).toBe(64);
+    expect(loadConfig({ TRACEPANEL_MAX_BODY_KB: "big" }).maxBodyKb).toBe(64);
+  });
+});

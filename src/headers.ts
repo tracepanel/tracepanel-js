@@ -3,19 +3,24 @@
 // the request carried goes into its trace (headers, query, cookies, the body as far as the framework read it for the
 // app), with the response's headers; and a redirect that answers a page's navigation sets the cookie that shows it in
 // the next page's panel. A request's body is tapped as the server hands the request over: the framework reads it from
-// the stream, and its pieces pass the tap on their way (body.ts).
+// the stream, and its pieces pass the tap on their way (body.ts). Its response's body is tapped then too, on its way
+// out, and the trace reads it as it ends (response-body.ts).
 
 import http, { type IncomingMessage, ServerResponse } from "node:http";
 import https from "node:https";
 import { incomingOperation, tapIncoming, tapOf, tapsBody } from "./body.js";
 import { redirectCookie, requestAttrs, responseHeaders, searchOf } from "./request.js";
+import { capturesResponse, tapResponse } from "./response-body.js";
 import type { Runtime } from "./runtime.js";
 import { exposedHeaders } from "./widget.js";
 
 const PATCHED = Symbol.for("tracepanel.headers");
 const TAPPING = Symbol.for("tracepanel.body.tapping");
 
-/** The app's HTTP servers (made before this runs too) tap the body of each request that has one. */
+/**
+ * The app's HTTP servers (made before this runs too) tap the body of each request that has one, and of each response
+ * when bodies are recorded.
+ */
 function tapBodies(tracepanel: Runtime): void {
   for (const prototype of [http.Server.prototype, https.Server.prototype]) {
     const server = prototype as http.Server & { [TAPPING]?: boolean };
@@ -27,6 +32,8 @@ function tapBodies(tracepanel: Runtime): void {
       if (event === "request" && req && tapsBody(tracepanel.config.captureRequest, req.headers) && !tapOf(req)) {
         tapIncoming(req);
       }
+      const res = args[1] as ServerResponse | undefined;
+      if (event === "request" && res && capturesResponse(tracepanel)) tapResponse(res);
       return emit.call(this, event, ...args);
     } as typeof emit;
   }
@@ -48,6 +55,10 @@ export function headersOnResponses(tracepanel: Runtime, framework: string): void
       const passed = (given ?? {}) as Record<string, unknown>;
       const read = this.req ? incomingOperation(this.req) : undefined;
       if (read) tracepanel.processor.readOperation(read, { method, url });
+      if (capturesResponse(tracepanel) && this.req) {
+        const tap = tapResponse(this);
+        tracepanel.processor.readResponse(() => tap.attrs(), { method, url });
+      }
       if (tracepanel.config.captureRequest && this.req) {
         // Before the badge: a response sent outside the request's context finds its trace by the URL until then.
         tracepanel.processor.setTraceAttrs(

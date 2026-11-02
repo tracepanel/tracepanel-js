@@ -2,17 +2,29 @@
 // headers; and the cookie that tells the widget which requests redirected to the page it is on.
 //
 // They stay on this machine (the agent keeps them out of what it sends anywhere), and the values under a sensitive
-// name are masked before they are recorded. A body is only what the app read itself, up to MAX_BODY characters: a
+// name are masked before they are recorded. A body is only what the app read itself, up to bodyLimit() characters: a
 // body parser's `req.body`, or the bytes the app's own reads took from the request's stream (body.ts). Tracepanel
-// never reads a request's stream for the app.
+// never reads a request's stream for the app. A response's body is the one the app sent (response-body.ts).
 
 import { MASK, masks, sensitive as secretName } from "./masking.js";
 import type { Attrs } from "./model.js";
 
 export { MASK };
 
-/** How much of a body is kept, in characters. */
-export const MAX_BODY = 16_384;
+/** How much of a body is kept by default, in characters: TRACEPANEL_MAX_BODY_KB's default, 64 KiB. */
+export const MAX_BODY = 65_536;
+/** How much of a body is kept, in characters (and bytes): none when bodies aren't captured. */
+let limit = MAX_BODY;
+
+/** The process's limit for bodies, from its settings: TRACEPANEL_CAPTURE_BODY and TRACEPANEL_MAX_BODY_KB. */
+export function limitBodies(config: { captureBody: boolean; maxBodyKb: number }): void {
+  limit = config.captureBody ? Math.max(Math.floor(config.maxBodyKb), 0) * 1024 : 0;
+}
+
+/** How much of a body is kept, in characters (and bytes): 0 when bodies aren't captured. */
+export function bodyLimit(): number {
+  return limit;
+}
 /** A response's cookies are a session's keys, whatever their name. */
 const ALWAYS_MASKED = new Set(["set-cookie"]);
 /** A form as people read it: encoded, but its spaces, masks and file notes as they are. */
@@ -119,9 +131,10 @@ export function searchOf(url: string): string {
   return at < 0 ? "" : url.slice(at);
 }
 
-export function cut(text: string): Attrs {
-  if (text.length <= MAX_BODY) return { "http.request.body": text };
-  return { "http.request.body": text.slice(0, MAX_BODY), "http.request.body.truncated": true };
+export function cut(text: string, attr = "http.request.body"): Attrs {
+  if (limit === 0) return {};
+  if (text.length <= limit) return { [attr]: text };
+  return { [attr]: text.slice(0, limit), [`${attr}.truncated`]: true };
 }
 
 /** A JSON value with the values under sensitive keys masked, at any depth. */
@@ -156,7 +169,7 @@ export function kindOf(contentType: string): string {
   return (contentType.split(";", 1)[0] ?? "").trim().toLowerCase();
 }
 
-function isJson(kind: string): boolean {
+export function isJson(kind: string): boolean {
   return kind === "application/json" || kind.endsWith("+json");
 }
 
@@ -164,20 +177,33 @@ function isForm(kind: string): boolean {
   return kind === "application/x-www-form-urlencoded" || kind === "multipart/form-data";
 }
 
-/** A body read as text (a text or raw parser's): JSON and forms with secrets masked, text as it is, binary not. */
-function textBody(contentType: string, text: string): Attrs {
+/** A body as text: JSON and forms with secrets masked, text as it is; undefined for binary content. */
+export function readable(contentType: string, text: string): string | undefined {
   const kind = kindOf(contentType);
-  if (!text) return {};
   if (isJson(kind)) {
     try {
-      return cut(JSON.stringify(masked(JSON.parse(text))));
+      return JSON.stringify(masked(JSON.parse(text)));
     } catch {
-      return cut(text);
+      return text;
     }
   }
-  if (kind === "application/x-www-form-urlencoded") return cut(formText(new URLSearchParams(text)));
-  if (kind.startsWith("text/") || kind === "application/xml" || kind === "application/graphql") return cut(text);
-  return {};
+  if (kind === "application/x-www-form-urlencoded") return formText(new URLSearchParams(text));
+  if (
+    kind.startsWith("text/") ||
+    kind === "application/xml" ||
+    kind === "application/graphql" ||
+    kind.endsWith("+xml")
+  ) {
+    return text;
+  }
+  return undefined;
+}
+
+/** A body read as text (a text or raw parser's): JSON and forms with secrets masked, text as it is, binary not. */
+function textBody(contentType: string, text: string): Attrs {
+  if (!text || limit === 0) return {};
+  const found = readable(contentType, text);
+  return found === undefined ? {} : cut(found);
 }
 
 /**
@@ -187,7 +213,7 @@ function textBody(contentType: string, text: string): Attrs {
  */
 export function readBody(contentType: string, data: Uint8Array, complete: boolean): Attrs {
   const kind = kindOf(contentType);
-  if (data.length === 0 || (!complete && (isJson(kind) || isForm(kind)))) return {};
+  if (data.length === 0 || limit === 0 || (!complete && (isJson(kind) || isForm(kind)))) return {};
   return textBody(contentType, Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8"));
 }
 
@@ -222,6 +248,7 @@ export interface ParsedBody {
  */
 export function parsedBody({ contentType, body, file, files }: ParsedBody): Attrs {
   const kind = kindOf(contentType);
+  if (limit === 0) return {};
   const sent = uploads(file, files);
   if (typeof body === "string") return textBody(contentType, body);
   if (body instanceof Uint8Array) return textBody(contentType, Buffer.from(body).toString("utf8"));

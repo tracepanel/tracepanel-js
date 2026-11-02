@@ -24,6 +24,7 @@ let recorded: Attrs = {};
 const processor = {
   timing: () => undefined,
   framework: () => "Express",
+  readResponse: () => {},
   setFramework: () => {},
   setRoute: () => {},
   addLog: () => {},
