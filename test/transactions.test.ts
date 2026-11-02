@@ -6,7 +6,7 @@ import { type Config, loadConfig } from "../src/config.js";
 import type { Span, Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
 import { enter, QUERY_ORIGIN } from "../src/queries.js";
-import { wrapQuery, wrapRelease } from "../src/transactions.js";
+import { MYSQL, PG, wrapQuery, wrapRelease } from "../src/transactions.js";
 
 const config: Config = { ...loadConfig({}), enabled: true, root: "/app", service: "shop" };
 const sent: Trace[] = [];
@@ -199,6 +199,107 @@ describe("transactions", () => {
       ["http.client", "GET 127.0.0.1/charge", "transaction default"],
       ["transaction", "transaction default", "POST /checkout"],
       ["http", "POST /checkout", null],
+    ]);
+  });
+});
+
+/**
+ * A pg client connected to the database `shop`, as its instrumentation names it (db.namespace), and a mysql2
+ * connection to it as an older instrumentation names it (db.name).
+ */
+class ShopClient {
+  database = "shop";
+
+  async query(text: string): Promise<void> {
+    const attributes = { "db.system.name": "postgresql", "db.namespace": "shop", "db.query.text": text };
+    tracer.startSpan("pg.query", { kind: SpanKind.CLIENT, attributes }).end();
+  }
+}
+wrapQuery(ShopClient.prototype, "query", PG);
+
+class ShopConnection {
+  config = { host: "localhost", database: "shop" };
+
+  async query(text: string): Promise<void> {
+    const attributes = { "db.system": "mysql", "db.name": "shop", "db.statement": text };
+    tracer.startSpan("mysql2.query", { kind: SpanKind.CLIENT, attributes }).end();
+  }
+}
+wrapQuery(ShopConnection.prototype, "query", MYSQL);
+
+describe("the database's name", () => {
+  it("is the namespace of a statement and of its transaction, beside the alias", async () => {
+    const result = await request(async () => {
+      for (const connection of [new ShopClient(), new ShopConnection()]) {
+        await connection.query("BEGIN");
+        await connection.query("SELECT 1");
+        await connection.query("COMMIT");
+      }
+    });
+
+    const caller = expect.stringMatching(/\/test\/transactions\.test\.ts:\d+ in /);
+    expect(result.spans.filter((span) => span.kind !== "http").map((span) => [span.name, span.attrs])).toEqual([
+      [
+        "SELECT",
+        {
+          "db.client": "pg",
+          "db.system": "postgresql",
+          "db.vendor": "postgresql",
+          "db.alias": "default",
+          "db.namespace": "shop",
+          "db.statement": "SELECT 1",
+          "db.fingerprint": "SELECT 1",
+          "db.params_hash": null,
+          "db.many": false,
+          "code.origin": null,
+          "code.caller": caller,
+        },
+      ],
+      [
+        "transaction default",
+        {
+          "db.client": "pg",
+          "db.system": "postgresql",
+          "db.vendor": "postgresql",
+          "db.alias": "default",
+          "db.namespace": "shop",
+          "db.transaction.savepoint": false,
+          "db.transaction.outcome": "commit",
+          "code.origin": null,
+          "code.caller": caller,
+        },
+      ],
+      [
+        "SELECT",
+        {
+          "db.params": [],
+          "db.client": "mysql",
+          "db.system": "mysql",
+          "db.vendor": "mysql",
+          "db.alias": "default",
+          "db.namespace": "shop",
+          "db.statement": "SELECT 1",
+          "db.fingerprint": "SELECT 1",
+          "db.params_hash": null,
+          "db.many": false,
+          "code.origin": null,
+          "code.caller": caller,
+        },
+      ],
+      [
+        "transaction default",
+        {
+          "db.client": "mysql2",
+          "db.system": "mysql",
+          "db.vendor": "mysql",
+          "db.alias": "default",
+          "db.namespace": "shop",
+          "db.transaction.savepoint": false,
+          "db.transaction.outcome": "commit",
+          "code.origin": null,
+          "code.caller": caller,
+        },
+      ],
     ]);
   });
 });

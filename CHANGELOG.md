@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- A pg or mysql2 statement shows its database (`db.namespace`) again,
+  and a transaction span names its connection's database too.
+
 ### Added
 
 - EXPLAIN of a CTE (`WITH … SELECT …`), with the rule the agent and the

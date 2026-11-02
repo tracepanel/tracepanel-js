@@ -43,9 +43,14 @@ const RUNS: Record<string, ((result: unknown) => number) | null> = {
   iterate: null,
 };
 
-const BETTER_SQLITE3: Driver = { client: "better-sqlite3", system: "sqlite" };
-const NODE_SQLITE: Driver = { client: "node:sqlite", system: "sqlite" };
-const LIBSQL: Driver = { client: "libsql", system: "sqlite" };
+// A transaction's database is its file, as a statement's is.
+const BETTER_SQLITE3: Driver = {
+  client: "better-sqlite3",
+  system: "sqlite",
+  namespace: (db) => fileOf(db, BETTER_SQLITE3),
+};
+const NODE_SQLITE: Driver = { client: "node:sqlite", system: "sqlite", namespace: (db) => fileOf(db, NODE_SQLITE) };
+const LIBSQL: Driver = { client: "libsql", system: "sqlite", namespace: (db) => fileOf(db, LIBSQL) };
 
 /** The database's file, as the span names it: its name only; none for one in memory. */
 function fileOf(db: Any, driver: Driver): string | null {
