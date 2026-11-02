@@ -37,6 +37,7 @@ process.env.TRACEPANEL_AGENT_BIN = FAKE;
 const processor = {
   timing: () => ({ id: "01TRACE", queries: 2, dbMs: 1.5, startedMs: performance.now() }),
   framework: () => "Next.js",
+  readResponse: () => {},
 } as unknown as TracepanelProcessor;
 const tracepanel: Runtime = {
   config: { ...loadConfig({}), enabled: true, storeDir: store },

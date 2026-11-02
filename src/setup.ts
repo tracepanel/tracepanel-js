@@ -31,6 +31,7 @@ import { traceBunCalls } from "./outgoing.js";
 import { askAttributes, asks } from "./profile.js";
 import { profilePropagator } from "./propagation.js";
 import { traceBunQueries } from "./queries.js";
+import { responseHook } from "./response-body.js";
 import { type Runtime, runtime } from "./runtime.js";
 import { SqliteInstrumentation } from "./sqlite.js";
 import { keepErrorSites } from "./stack.js";
@@ -136,6 +137,8 @@ export function start(options: Options = {}): Runtime | undefined {
         (request.method === "OPTIONS" && request.headers["access-control-request-method"] !== undefined),
       // A GraphQL request's operation, whatever the answer: one before the operation ran too (a 503).
       requestHook: operationHook(tracepanel),
+      // The response's body as it goes out, tapped as the request starts: its trace reads it as it ends.
+      responseHook: responseHook(tracepanel),
       // What a request asks to be profiled for says so on its span, as it starts.
       startIncomingSpanHook: (request) => {
         return askAttributes(

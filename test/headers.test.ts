@@ -17,6 +17,7 @@ let recorded: { attrs: Attrs; request: { method: string; url: string } | undefin
 const processor = {
   timing: () => ({ id: "01TRACE", queries: 0, dbMs: 0, startedMs: performance.now() }),
   framework: () => "Next.js",
+  readResponse: () => {},
   setTraceAttrs: (attrs: Attrs, request?: { method: string; url: string }) => {
     recorded = { attrs, request };
   },

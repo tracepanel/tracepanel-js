@@ -24,6 +24,7 @@ let recorded: Attrs = {};
 const processor = {
   timing: () => ({ id: "01TRACE", queries: 0, dbMs: 0, startedMs: performance.now() }),
   framework: () => "Bun.serve",
+  readResponse: () => {},
   setFramework: () => {},
   setTraceAttrs: (attrs: Attrs) => {
     recorded = attrs;

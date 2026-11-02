@@ -19,6 +19,14 @@ export interface Config {
    */
   captureRequest: boolean;
   /**
+   * Keep the bodies of requests and of their responses with them (with captureRequest): JSON and forms (masked) and
+   * text, a file upload by its name and size; a response's stream, pages, scripts, compressed and binary content by
+   * their size only. TRACEPANEL_CAPTURE_BODY=0 turns it off.
+   */
+  captureBody: boolean;
+  /** How much of a body is kept, in KiB: a longer one is cut there, marked as cut. TRACEPANEL_MAX_BODY_KB, 64. */
+  maxBodyKb: number;
+  /**
    * Keep the local variables of the app's own frames of an error (masked; they never leave this machine), read
    * through Node's inspector: TRACEPANEL_CAPTURE_LOCALS=0 turns it off.
    */
@@ -128,6 +136,14 @@ function onlyIf(value: string | undefined): boolean {
   return value !== undefined && value !== "" && !OFF.has(value.toLowerCase());
 }
 
+/** A size in KiB from a TRACEPANEL_* variable: a whole number, 0 or more; the default when it isn't one. */
+function kibibytes(value: string | undefined, fallback: number): number {
+  const number = Number(value);
+  return value === undefined || value.trim() === "" || !Number.isFinite(number) || number < 0
+    ? fallback
+    : Math.floor(number);
+}
+
 /** On in development: unless NODE_ENV is production, or TRACEPANEL_ENABLED turns it off (or on). */
 function enabled(env: NodeJS.ProcessEnv): boolean {
   const explicit = env.TRACEPANEL_ENABLED?.toLowerCase();
@@ -154,6 +170,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxTraces: Number(env.TRACEPANEL_MAX_TRACES) || 2000,
     thresholds: thresholds(env),
     captureRequest: on(env.TRACEPANEL_CAPTURE_REQUEST),
+    captureBody: on(env.TRACEPANEL_CAPTURE_BODY),
+    maxBodyKb: kibibytes(env.TRACEPANEL_MAX_BODY_KB, 64),
     captureLocals: on(env.TRACEPANEL_CAPTURE_LOCALS),
     widget: on(env.TRACEPANEL_WIDGET),
     dumps: on(env.TRACEPANEL_DUMPS),

@@ -16,6 +16,7 @@ import { operationHook } from "../src/body.js";
 import { type Config, loadConfig } from "../src/config.js";
 import type { Trace } from "../src/model.js";
 import { TracepanelProcessor } from "../src/processor.js";
+import { responseHook } from "../src/response-body.js";
 import type { Runtime } from "../src/runtime.js";
 import { badge } from "../src/widget.js";
 
@@ -48,7 +49,11 @@ export const tracepanel: Runtime = {
 
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 new NodeTracerProvider({ spanProcessors: [processor] }).register();
-registerInstrumentations({ instrumentations: [new HttpInstrumentation({ requestHook: operationHook(tracepanel) })] });
+registerInstrumentations({
+  instrumentations: [
+    new HttpInstrumentation({ requestHook: operationHook(tracepanel), responseHook: responseHook(tracepanel) }),
+  ],
+});
 // Loaded through require, node:http is patched: its server's prototype is the one ES modules import too.
 createRequire(import.meta.url)("node:http");
 

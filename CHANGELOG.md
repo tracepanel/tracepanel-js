@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A server request's trace has its response's body, as the Python SDK
+  records it: `http.response.body` and its size in bytes,
+  `http.response.body.size`, so the panel's Request tab shows the
+  response a GraphQL server, an API route or a handler sent. JSON and
+  forms have their secrets masked, text is kept as it is, and a body past
+  the limit is cut there and marked `http.response.body.truncated`. A
+  stream (Server-Sent Events, NDJSON, a body written in pieces without a
+  Content-Length), a compressed body, a page and its assets, binary
+  content and JSON past 4 MiB are recorded by their size only. The body
+  passes a tap on its way out: nothing waits for it, and the client gets
+  it as it would have. Node's HTTP server, Express, Fastify, Koa, Next.js
+  route handlers, Hono, Bun.serve, GraphQL Yoga and Apollo Server.
+- `TRACEPANEL_CAPTURE_BODY=0` stops keeping the bodies of requests and of
+  their responses, and `TRACEPANEL_MAX_BODY_KB` sets how much of one is
+  kept (64 KiB), the Python SDK's `capture_body` and `max_body_kb`.
+
+### Changed
+
+- A request's body is kept up to 64 KiB, as in the Python SDK, not
+  16 KiB.
+
 ## 0.12.0 (2026-11-02)
 
 ### Fixed

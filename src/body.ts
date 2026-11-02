@@ -4,6 +4,8 @@
 // recorded, and nothing waits for it. The app gets every byte as it came, at the pace it reads them, so an upload
 // still streams; the tap never holds more than MAX_BODY bytes of it.
 //
+// MAX_BODY here is bodyLimit(): TRACEPANEL_MAX_BODY_KB, none with TRACEPANEL_CAPTURE_BODY=0.
+//
 // A multipart form is read as it passes: its fields' values (up to MAX_BODY in all), and its files by name and size,
 // counted, never kept. JSON or a URL-encoded form past MAX_BODY isn't recorded: its secrets can't be masked from a
 // part of it. Text past it is cut.
@@ -12,7 +14,7 @@ import type { ClientRequest, IncomingMessage } from "node:http";
 import type { Span } from "@opentelemetry/api";
 import { GRAPHQL_MAX, type GraphqlOperation, graphqlOperationOfBody, graphqlOperationOfQuery } from "./browser.js";
 import type { Attrs } from "./model.js";
-import { cut, formText, hasBody, headerValue, kindOf, MAX_BODY, type RequestHeaders, readBody } from "./request.js";
+import { bodyLimit, cut, formText, hasBody, headerValue, kindOf, type RequestHeaders, readBody } from "./request.js";
 import type { Runtime } from "./runtime.js";
 
 const TAP = Symbol.for("tracepanel.body");
@@ -33,7 +35,7 @@ class Multipart {
   private pending: Buffer = Buffer.from("\r\n");
   private state: "body" | "after" | "headers" = "body";
   private part: { name: string; filename: string | undefined; size: number; value: Buffer[] } | undefined;
-  private budget = MAX_BODY + 1;
+  private budget = bodyLimit() + 1;
 
   constructor(boundary: string) {
     this.delimiter = Buffer.from(`\r\n--${boundary}`);
@@ -170,11 +172,14 @@ export class BodyTap {
   private readonly form: Multipart | undefined;
   /** How many bytes are kept: a byte past what a body or an operation is read from, to know it was cut. */
   private readonly keep: number;
+  /** How much of a body is recorded: bodyLimit() as the request came. */
+  private readonly limit: number;
 
   constructor(private readonly contentType: string) {
     const boundary = kindOf(contentType) === "multipart/form-data" ? boundaryOf(contentType) : undefined;
     this.form = boundary ? new Multipart(boundary) : undefined;
-    this.keep = (mayCarryOperation(contentType, undefined) ? Math.max(MAX_BODY, GRAPHQL_MAX) : MAX_BODY) + 1;
+    this.limit = bodyLimit();
+    this.keep = (mayCarryOperation(contentType, undefined) ? Math.max(this.limit, GRAPHQL_MAX) : this.limit) + 1;
   }
 
   /** A piece of the body on its way to the app. */
@@ -203,8 +208,8 @@ export class BodyTap {
       return this.form.overflow ? { ...cut(text), "http.request.body.truncated": true } : cut(text);
     }
     const all = Buffer.concat(this.kept);
-    const data = all.length > MAX_BODY + 1 ? all.subarray(0, MAX_BODY + 1) : all;
-    const found = readBody(this.contentType, data, this.ended && this.size <= MAX_BODY);
+    const data = all.length > this.limit + 1 ? all.subarray(0, this.limit + 1) : all;
+    const found = readBody(this.contentType, data, this.ended && this.size <= this.limit);
     // Its characters more than one byte each, the body was cut before MAX_BODY characters.
     if ("http.request.body" in found && this.size > data.length) found["http.request.body.truncated"] = true;
     return found;

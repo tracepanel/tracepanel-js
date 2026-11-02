@@ -326,6 +326,11 @@ the line that ran it and the fix:
 
 - HTTP requests: route, handler, headers, query, cookies and the body the app
   read, secrets masked.
+- The response's body as the app sent it, with its size: JSON (secrets
+  masked) and text, cut at 64 KiB. A stream (Server-Sent Events, a body
+  written in pieces), a compressed body, a page and its assets, and binary
+  content are recorded by their size only; the response goes out as it
+  would have, never held.
 - The session as the handler left it: express-session, cookie-session, h3's
   `useSession()`.
 - A form's POST that redirects, listed on the next page's panel.
@@ -494,6 +499,8 @@ Environment variables, as in the Python SDK:
 | `TRACEPANEL_LARGE_RESULT_ROWS` | `1000` | a query without a LIMIT that read too many rows |
 | `TRACEPANEL_WIDGET` | on (off in tests) | `0` leaves the app's HTML pages without the widget's script |
 | `TRACEPANEL_CAPTURE_REQUEST` | on | `0` stops keeping each request's headers, query, cookies and body |
+| `TRACEPANEL_CAPTURE_BODY` | on | `0` stops keeping the bodies of requests and their responses |
+| `TRACEPANEL_MAX_BODY_KB` | `64` | how much of a body is kept, in KiB: a longer one is cut there |
 | `TRACEPANEL_CAPTURE_LOCALS` | on | `0` stops reading an error's local variables |
 | `TRACEPANEL_DUMPS` | on | `0` records `console.log()` of an object as a log line, `console.dir()` and `console.table()` not at all |
 | `TRACEPANEL_PROFILE` | off | `1` profiles every trace, not only a request that asks |
