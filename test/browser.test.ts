@@ -440,4 +440,13 @@ test("a GraphQL call carries its operation whatever its answer: a 503, none, a G
   ]);
   expect(operation("http://app.test/graphql-xhr")).toEqual(["subscription", "OnReview"]);
   expect(operation("http://app.test/api/search")).toEqual([undefined, undefined]);
+
+  // Its document too, as it sent it: the call's details show it however the server records its trace.
+  const sentDocument = (url: string) => callTo(action, url).attrs["graphql.document"];
+  expect(sentDocument("http://app.test/graphql-unavailable")).toBe("query Authors { authors { id } }");
+  expect(sentDocument(`http://app.test/graphql?query=${encodeURIComponent("query Books { books { id } }")}`)).toBe(
+    "query Books { books { id } }",
+  );
+  expect(sentDocument("http://app.test/graphql-xhr")).toBe("subscription OnReview { reviewAdded { id } }");
+  expect(sentDocument("http://app.test/api/search")).toBeUndefined();
 });

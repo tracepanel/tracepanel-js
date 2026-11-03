@@ -257,6 +257,45 @@ export function graphqlOperationOfQuery(search: string): GraphqlOperation | unde
   return graphqlOperation(params.get("query"), params.get("operationName"));
 }
 
+/** The longest document a call's span keeps, in characters, as the server SDK keeps an operation's (graphql.ts). */
+const DOCUMENT_MAX = 2_000;
+
+/** A GraphQL document as a span keeps it: its whitespace collapsed, cut at DOCUMENT_MAX. */
+function documentText(query: unknown): string | undefined {
+  if (typeof query !== "string" || !query.trim()) return undefined;
+  const text = query.replace(/\s+/g, " ").trim();
+  return text.length <= DOCUMENT_MAX ? text : `${text.slice(0, DOCUMENT_MAX)}…`;
+}
+
+/** The document a request's body sent: the JSON's `query`, or the body itself (`application/graphql`). */
+function documentOfBody(body: unknown, contentType: string): string | undefined {
+  if (typeof body !== "string" || body.length > GRAPHQL_MAX) return undefined;
+  if (contentType.split(";", 1)[0]?.trim().toLowerCase() === "application/graphql") return documentText(body);
+  try {
+    return documentText((JSON.parse(body) as { query?: unknown }).query);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a GraphQL call sent, as its span says it: its operation, and its document, so the call's details show what it
+ * asked even when the server that answered records no trace of the document (a gateway's spans over OTLP). None for
+ * any other call.
+ */
+export function graphqlCall(
+  method: string,
+  search: string,
+  body: unknown,
+  contentType = "",
+): (GraphqlOperation & { "graphql.document"?: string }) | undefined {
+  const get = method.toUpperCase() === "GET";
+  const operation = get ? graphqlOperationOfQuery(search) : graphqlOperationOfBody(body, contentType);
+  if (!operation) return undefined;
+  const document = get ? documentText(new URLSearchParams(search).get("query")) : documentOfBody(body, contentType);
+  return document ? { ...operation, "graphql.document": document } : operation;
+}
+
 /** What the panel's Profile toggle asks for now: "1", "memory", or nothing while it is off. */
 function profileAsked(): string | undefined {
   let cookies = "";
@@ -543,10 +582,8 @@ export function record(options: BrowserOptions = {}): void {
         "server.address": url.hostname,
         "server.port": Number(url.port) || (url.protocol === "https:" ? 443 : 80),
         "w3c.span_id": spanId,
-        // A GraphQL request's operation, whatever its answer (none, an error, a 503 before it ran).
-        ...(method.toUpperCase() === "GET"
-          ? graphqlOperationOfQuery(url.search)
-          : graphqlOperationOfBody(body, contentType)),
+        // A GraphQL request's operation and document, whatever its answer (none, an error, a 503 before it ran).
+        ...graphqlCall(method, url.search, body, contentType),
       },
     };
     if (current.trace.spans.length < MAX_SPANS) current.trace.spans.push(span);

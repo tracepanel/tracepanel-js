@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A GraphQL call the browser recording sees keeps the document it sent,
+  `graphql.document`, beside its operation (whitespace collapsed, cut at
+  2,000 characters, as a server's operation keeps it). The panel shows
+  the query on the call's row however the server that answered records
+  its trace. An Apollo Router sending its spans over OTLP records none by
+  default.
 ## 0.13.0 (2026-11-03)
 
 ### Added
