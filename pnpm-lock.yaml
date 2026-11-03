@@ -215,8 +215,8 @@ importers:
         specifier: ^7.10.0
         version: 7.10.0(@opentelemetry/api@1.9.1)
       '@tracepanel/agent':
-        specifier: ~0.13.0
-        version: 0.13.0
+        specifier: ~0.13.1
+        version: 0.13.1
       import-in-the-middle:
         specifier: ^3.5.2
         version: 3.5.2
@@ -1353,76 +1353,80 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@tracepanel/agent-darwin-arm64@0.13.0':
-    resolution: {integrity: sha512-ln26X0KJoj2FRmgecoHZxSi/Z4qo36ddWCASEXYuLUOC1eSavuasa160p4E5bJ5CWdf/r9SR6AgI+61m6fnyXA==}
+  '@tracepanel/agent-darwin-arm64@0.13.1':
+    resolution: {integrity: sha512-jUCsrC7NAnoA5jecX7Su+y0kFS1qVtATRRJg1f7Zt+SveaCg0LvfeQIFTV5agAIdGQj/JXaAnnzy3lukjTfsPA==}
     cpu: [arm64]
     os: [darwin]
 
-  '@tracepanel/agent-darwin-x64@0.13.0':
-    resolution: {integrity: sha512-EeRikMuP/5ShU7EOFpqqSUPkWn5l8crzc05umeyg3W0YqLIQuIlNnfpGyWsMGIvg1eet9SKCldwSRpjWyd2u8A==}
+  '@tracepanel/agent-darwin-x64@0.13.1':
+    resolution: {integrity: sha512-sE8ybzE/rEN01x8TfQM7Wu2odDM4UOaMeELQK1APfDSPUtP/oWQ3nMa6NGUe35tK+rAVNR/bHDc1JqOr1CD2fA==}
     cpu: [x64]
     os: [darwin]
 
-  '@tracepanel/agent-linux-arm64-gnu@0.13.0':
-    resolution: {integrity: sha512-Yj2b04+UitOv7amZJeXUN44YQOQDHtKzuEAAwMNUpwSTxmW1BThP6FEb7vpABl8JTQ3D3LCDb5ht4o8mchAp6A==}
+  '@tracepanel/agent-linux-arm64-gnu@0.13.1':
+    resolution: {integrity: sha512-TguIHGozaKqrA/BIzgtIqBQgFuTjPFD+C6qrUiXt//OAdWbM4FRX3xvhhrTE2xnBzr+tr8OsWM0AdQy0cTQSCg==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@tracepanel/agent-linux-arm64-musl@0.13.0':
-    resolution: {integrity: sha512-csMVNA94vL7Wehr3U8J3Ho7f+EuUwjLoTq00a9nKfjRB0sPemif0u+8AavZ25knI9G8tzAnGuO0WfjTTgQ/d4w==}
+  '@tracepanel/agent-linux-arm64-musl@0.13.1':
+    resolution: {integrity: sha512-tbPlkw4G+GF6erPfW3P4Gu5XnMb/6pSm0+iHQKVPDa4qN9QMe6Xhxm1ooQkLviV8+iIJkhT+OuaAD4urhZOYJA==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@tracepanel/agent-linux-arm@0.13.0':
-    resolution: {integrity: sha512-NuNjbNWjvJLT5C02A5tYhRTYI4Mk2i+j/q+6u/V33kvQTTjpPKQR9wUpeBCLz2p3ML7Qzu/dXebIlcCD4eoICA==}
+  '@tracepanel/agent-linux-arm@0.13.1':
+    resolution: {integrity: sha512-QZvVsMC30cLbLcxDbPqLP+X5e6AZZfO8lxrXObrGks2cGbrU50UlPGGzFzaA1G1VNBl5NbSufKIuH/prdxdoAg==}
     cpu: [arm]
     os: [linux]
 
-  '@tracepanel/agent-linux-ia32-gnu@0.13.0':
-    resolution: {integrity: sha512-RcXf/7Tv/wBLriUKKvNT8Z2ZJVBvRKTCPmPJ/8iWAY260PdLMZ2JFhUkbAb2SUQY7ewQ2yn5ffu9wDzfKQm+WQ==}
+  '@tracepanel/agent-linux-ia32-gnu@0.13.1':
+    resolution: {integrity: sha512-XUks3ovyGAEkRCHLby48QZEkMbqYKlf9Tbm0kC9MioxQVH9brtbp4hTLqmPNqDJwVNppuZIKrCxoeMvJuwyOyw==}
     cpu: [ia32]
     os: [linux]
     libc: [glibc]
 
-  '@tracepanel/agent-linux-ia32-musl@0.13.0':
-    resolution: {integrity: sha512-wib/mOKoJ4U0XKuz1dworrxNOkeG/3k1x+SuywdqUJP6LEzLZeRLleDsGpb643T6iQxcMfOpRH6k66rgAlxhJA==}
+  '@tracepanel/agent-linux-ia32-musl@0.13.1':
+    resolution: {integrity: sha512-4gG5mS7HRvsgClsJjTWJQS1vbWfc0Glafqz8rABj2/GLieYUySGmG6jkEl0IYmgkP8epZzpSBvLMZkQBCmicCg==}
     cpu: [ia32]
     os: [linux]
     libc: [musl]
 
-  '@tracepanel/agent-linux-ppc64-gnu@0.13.0':
-    resolution: {integrity: sha512-h+eo7KfQxsIhbRtzq4WVYSNlMKIm+hB+iOd8hLprw5vXEBz6YRr0RSpeu/qn7O3ArPx+4yj6PfgVtkFn6xWxzA==}
+  '@tracepanel/agent-linux-ppc64-gnu@0.13.1':
+    resolution: {integrity: sha512-pfA/+zVKTzxqkKkWtriA8nULeklkMVARO3wyjX5mH583RSyCPkmHWYVwZAygluduD5wtPV9JGrnxfk2HuY0a8g==}
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
-  '@tracepanel/agent-linux-riscv64-gnu@0.13.0':
-    resolution: {integrity: sha512-uOOYtZgtK4McW4efiSTKoq5LnbMncCfQcuvk7V+H1Cuw7Engyjd9yvgfBxuB1Dm1SqgynTxLnQpJ47ScPftmCw==}
+  '@tracepanel/agent-linux-riscv64-gnu@0.13.1':
+    resolution: {integrity: sha512-svBbUompxDaxcDBR7C5qGX5zKGGj6u1YUKp4cfDt6V/+7T4lzKze02HNxLgSEJ7ZTkQz7n9MhtvM7/NNYs8/SA==}
     cpu: [riscv64]
     os: [linux]
     libc: [glibc]
 
-  '@tracepanel/agent-linux-x64-gnu@0.13.0':
-    resolution: {integrity: sha512-dE/zPnlNfZKF9h0KlNFD+Qhvo7lbfRRqpgutylvR6IB8AQxtYPEAGCNND5DY2I1AqOwRnqVlFsyMjIiT+7avjQ==}
-    cpu: [x64]
+  '@tracepanel/agent-linux-s390x-gnu@0.13.1':
+    resolution: {integrity: sha512-LmwmhjDnSzBnbtIWjdqQo+7keVGlkT2A5z17ZEikV8dUKc9bzRzPYzNN0HMbY1Mq2cS0KWNIehTGYkFCQqtHxg==}
+    cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
-  '@tracepanel/agent-linux-x64-musl@0.13.0':
-    resolution: {integrity: sha512-tvAOVxfrqUPpKJLu5DVg7iBMUeIhHgXpCLbTd8b7HoC/omjgP7ZlADJhsd/tvO/PzZladg42GYa6PELT8AtZFg==}
-    cpu: [x64]
-    os: [linux]
-    libc: [musl]
-
-  '@tracepanel/agent-win32-arm64@0.13.0':
-    resolution: {integrity: sha512-3JApCmMQ0Tyt3vlIaiRXRbtPQVv5QvBFnA6eWnudpdCYA41d+juvMmPeUjaNGgFsAhFFrQTpekBTpYxDylrJWQ==}
+  '@tracepanel/agent-win32-arm64@0.13.1':
+    resolution: {integrity: sha512-4lDuCB04KszbjmIXQbpFBVmAdiq+Pv8v+QN8UewSbNS5aoaBWuNhFeHL0cO6N1gpMqQDLqTiAxECp14mY5tvLA==}
     cpu: [arm64]
     os: [win32]
 
-  '@tracepanel/agent@0.13.0':
-    resolution: {integrity: sha512-CtKsrGIhaOCKW+nc+nSQtbLxBghTAevs3qAJFm5GKuOAVK9hKjmmpvTXHUt3aEL/5i8XWSPAgP+TvFKj629kkw==}
+  '@tracepanel/agent-win32-ia32@0.13.1':
+    resolution: {integrity: sha512-GQoWywQ4PfI+QSy24Eu2ExKi0PL8AHHrK+EEpKiWWoa/ICv140uKFOz99iX30SqnOv/fOyocAbVXl74d8cwnTg==}
+    cpu: [ia32]
+    os: [win32]
+
+  '@tracepanel/agent-win32-x64@0.13.1':
+    resolution: {integrity: sha512-olfqK8imRWil1o71lBga4Igd8UIJnJ9Ryq16PPFCaQQI+ObD8Lo34ADCYEa9p5KuUvCB08QnjHAAjZpr+Cdm7Q==}
+    cpu: [x64]
+    os: [win32]
+
+  '@tracepanel/agent@0.13.1':
+    resolution: {integrity: sha512-a/cyK3gp1GYL54JFTb5IMVJrhx5ONHOlxe47KwK4fX/ur3RUHfYPNp/O/Unh2rnPcKBNCCA8k0ukn1YAbEOE+A==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -4035,56 +4039,60 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@tracepanel/agent-darwin-arm64@0.13.0':
+  '@tracepanel/agent-darwin-arm64@0.13.1':
     optional: true
 
-  '@tracepanel/agent-darwin-x64@0.13.0':
+  '@tracepanel/agent-darwin-x64@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-arm64-gnu@0.13.0':
+  '@tracepanel/agent-linux-arm64-gnu@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-arm64-musl@0.13.0':
+  '@tracepanel/agent-linux-arm64-musl@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-arm@0.13.0':
+  '@tracepanel/agent-linux-arm@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-ia32-gnu@0.13.0':
+  '@tracepanel/agent-linux-ia32-gnu@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-ia32-musl@0.13.0':
+  '@tracepanel/agent-linux-ia32-musl@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-ppc64-gnu@0.13.0':
+  '@tracepanel/agent-linux-ppc64-gnu@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-riscv64-gnu@0.13.0':
+  '@tracepanel/agent-linux-riscv64-gnu@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-x64-gnu@0.13.0':
+  '@tracepanel/agent-linux-s390x-gnu@0.13.1':
     optional: true
 
-  '@tracepanel/agent-linux-x64-musl@0.13.0':
+  '@tracepanel/agent-win32-arm64@0.13.1':
     optional: true
 
-  '@tracepanel/agent-win32-arm64@0.13.0':
+  '@tracepanel/agent-win32-ia32@0.13.1':
     optional: true
 
-  '@tracepanel/agent@0.13.0':
+  '@tracepanel/agent-win32-x64@0.13.1':
+    optional: true
+
+  '@tracepanel/agent@0.13.1':
     optionalDependencies:
-      '@tracepanel/agent-darwin-arm64': 0.13.0
-      '@tracepanel/agent-darwin-x64': 0.13.0
-      '@tracepanel/agent-linux-arm': 0.13.0
-      '@tracepanel/agent-linux-arm64-gnu': 0.13.0
-      '@tracepanel/agent-linux-arm64-musl': 0.13.0
-      '@tracepanel/agent-linux-ia32-gnu': 0.13.0
-      '@tracepanel/agent-linux-ia32-musl': 0.13.0
-      '@tracepanel/agent-linux-ppc64-gnu': 0.13.0
-      '@tracepanel/agent-linux-riscv64-gnu': 0.13.0
-      '@tracepanel/agent-linux-x64-gnu': 0.13.0
-      '@tracepanel/agent-linux-x64-musl': 0.13.0
-      '@tracepanel/agent-win32-arm64': 0.13.0
+      '@tracepanel/agent-darwin-arm64': 0.13.1
+      '@tracepanel/agent-darwin-x64': 0.13.1
+      '@tracepanel/agent-linux-arm': 0.13.1
+      '@tracepanel/agent-linux-arm64-gnu': 0.13.1
+      '@tracepanel/agent-linux-arm64-musl': 0.13.1
+      '@tracepanel/agent-linux-ia32-gnu': 0.13.1
+      '@tracepanel/agent-linux-ia32-musl': 0.13.1
+      '@tracepanel/agent-linux-ppc64-gnu': 0.13.1
+      '@tracepanel/agent-linux-riscv64-gnu': 0.13.1
+      '@tracepanel/agent-linux-s390x-gnu': 0.13.1
+      '@tracepanel/agent-win32-arm64': 0.13.1
+      '@tracepanel/agent-win32-ia32': 0.13.1
+      '@tracepanel/agent-win32-x64': 0.13.1
 
   '@types/accepts@1.3.7':
     dependencies:
