@@ -1410,6 +1410,18 @@ packages:
     os: [linux]
     libc: [glibc]
 
+  '@tracepanel/agent-linux-x64-gnu@0.13.1':
+    resolution: {integrity: sha512-5h4AvaCUvgmQVAOP6bvCk0L+IvXNrXLXyUNSi1jIPiCZY58T9L0DXjrxqh3htPbzxZ/a0Q0khf0+LL+Bxec3Rw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@tracepanel/agent-linux-x64-musl@0.13.1':
+    resolution: {integrity: sha512-0FEhpxFcLrFCKHjrWpXhsOycwBYFduW4UAyrs1FL8Sd9OZs1ldXlPZNHSXpVvB5hriYLW7nZL+FC2V+oJ6fPXQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
   '@tracepanel/agent-win32-arm64@0.13.1':
     resolution: {integrity: sha512-4lDuCB04KszbjmIXQbpFBVmAdiq+Pv8v+QN8UewSbNS5aoaBWuNhFeHL0cO6N1gpMqQDLqTiAxECp14mY5tvLA==}
     cpu: [arm64]
@@ -4069,6 +4081,12 @@ snapshots:
   '@tracepanel/agent-linux-s390x-gnu@0.13.1':
     optional: true
 
+  '@tracepanel/agent-linux-x64-gnu@0.13.1':
+    optional: true
+
+  '@tracepanel/agent-linux-x64-musl@0.13.1':
+    optional: true
+
   '@tracepanel/agent-win32-arm64@0.13.1':
     optional: true
 
@@ -4090,6 +4108,8 @@ snapshots:
       '@tracepanel/agent-linux-ppc64-gnu': 0.13.1
       '@tracepanel/agent-linux-riscv64-gnu': 0.13.1
       '@tracepanel/agent-linux-s390x-gnu': 0.13.1
+      '@tracepanel/agent-linux-x64-gnu': 0.13.1
+      '@tracepanel/agent-linux-x64-musl': 0.13.1
       '@tracepanel/agent-win32-arm64': 0.13.1
       '@tracepanel/agent-win32-ia32': 0.13.1
       '@tracepanel/agent-win32-x64': 0.13.1
