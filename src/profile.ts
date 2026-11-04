@@ -7,8 +7,10 @@
 // can't tell which request a frame belongs to. So a profiled trace keeps the samples taken while it was the only trace
 // running here, as the Python SDK keeps a thread's samples only while it runs one trace; those taken while another
 // ran too are dropped and counted (`tracepanel.dropped_samples`). What the process did meanwhile outside any request
-// (a timer, the garbage collector) is in the profile too. Samples of an idle loop, the request waiting on I/O, are
-// left out: the profile is where the time went in code, on the CPU.
+// (a timer, the garbage collector) is in the profile too. A sample of the idle loop (the request waiting on I/O, a
+// timer) is the trace waiting: one stack of its own, its frame saying so (`waiting`), as the Python SDK's waits are.
+// Each sample is counted in the 10 ms of the trace it was taken in (`bucket_us`, a stack's `at`), by V8's own time
+// of it, so the console splits the trace's time by when each stack ran, as it does every language's.
 //
 // One profile runs for as long as traces are profiled, so starting the next one costs next to nothing (the first
 // start reads every function V8 has compiled: tens of milliseconds); each trace's own profile is a console.profile()
@@ -47,6 +49,10 @@ const RENEW_MS = 60_000;
 const IDLE = "(idle)";
 const ROOT = "(root)";
 const OTHER: ProfileFrame = { function: "(other)", module: null, file: "", line: 0, in_app: false };
+/** The idle loop's samples: the trace waiting ("waiting · event loop" in the console). */
+const WAITING: ProfileFrame = { function: "event loop", module: null, file: "", line: 0, in_app: false, waiting: true };
+/** How wide a stretch of the trace a stack's `at` counts its samples in (µs), as every SDK counts them. */
+export const BUCKET_US = 10_000;
 
 /** A frame as the profile names it, once: by its function, file and line. */
 function frameKey(frame: ProfileFrame): string {
@@ -392,34 +398,42 @@ export class Profiler {
       return found;
     };
 
-    const counts = new Map<string, { frames: number[]; count: number }>();
+    /** A frame of this profiler's own (the idle loop's, the stacks past MAX_STACKS), added the first time. */
+    const own = (frame: ProfileFrame): number => {
+      let at = index.get(frame.function);
+      if (at === undefined) {
+        at = frames.length;
+        index.set(frame.function, at);
+        frames.push(frame);
+      }
+      return at;
+    };
+    const counts = new Map<string, { frames: number[]; count: number; at: Map<number, number> }>();
     let samples = 0;
     let dropped = 0;
     let time = profile.startTime;
     const deltas = profile.timeDeltas ?? [];
     (profile.samples ?? []).forEach((id, at) => {
       time += deltas[at] ?? 0;
-      let keys = stack(id);
-      if (keys === null || keys.length === 0) return;
-      // The profile's clock is V8's; it started as the recording did.
-      if (this.shared(recording, recording.startedMs + (time - profile.startTime) / 1000)) {
+      const found = stack(id);
+      if (found !== null && found.length === 0) return;
+      // The profile's clock is V8's (µs); it started as the recording did.
+      const since = Math.max(time - profile.startTime, 0);
+      if (this.shared(recording, recording.startedMs + since / 1000)) {
         dropped += 1;
         return;
       }
+      let keys = found ?? [own(WAITING)];
       let key = keys.join(",");
       if (!counts.has(key) && counts.size >= MAX_STACKS) {
-        let other = index.get(OTHER.function);
-        if (other === undefined) {
-          other = frames.length;
-          index.set(OTHER.function, other);
-          frames.push(OTHER);
-        }
-        keys = [other];
-        key = String(other);
+        keys = [own(OTHER)];
+        key = keys.join(",");
       }
-      const counted = counts.get(key);
-      if (counted) counted.count += 1;
-      else counts.set(key, { frames: keys, count: 1 });
+      const counted = counts.get(key) ?? { frames: keys, count: 0, at: new Map<number, number>() };
+      const bucket = Math.floor(since / BUCKET_US);
+      counted.count += 1;
+      counted.at.set(bucket, (counted.at.get(bucket) ?? 0) + 1);
+      counts.set(key, counted);
       samples += 1;
     });
     if (samples === 0) return { profile: undefined, dropped };
@@ -439,7 +453,17 @@ export class Profiler {
       });
     }
     return {
-      profile: { interval_us: Math.round(this.intervalMs * 1000), samples, frames: kept, stacks },
+      profile: {
+        interval_us: Math.round(this.intervalMs * 1000),
+        samples,
+        bucket_us: BUCKET_US,
+        frames: kept,
+        stacks: stacks.map((counted) => ({
+          frames: counted.frames,
+          count: counted.count,
+          at: [...counted.at].sort(([a], [b]) => a - b),
+        })),
+      },
       dropped,
     };
   }

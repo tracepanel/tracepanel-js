@@ -68,8 +68,11 @@ export interface Trace {
 export interface Profile {
   interval_us: number;
   samples: number;
+  /** How wide a stretch of the trace a stack's `at` counts in (µs), from the trace's start. */
+  bucket_us?: number;
   frames: ProfileFrame[];
-  stacks: { frames: number[]; count: number }[];
+  /** Each stack, how many samples saw it, and when: [bucket, samples] pairs. */
+  stacks: { frames: number[]; count: number; at?: [number, number][] }[];
   /** What its code allocated, when its memory was asked for (memory.ts). */
   memory?: ProfileMemory;
   /** The garbage collector's runs while it ran. */
@@ -93,6 +96,8 @@ export interface ProfileFrame {
   /** Where the function is defined. */
   line: number;
   in_app: boolean;
+  /** Waiting, not computing: the idle event loop. */
+  waiting?: boolean;
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
