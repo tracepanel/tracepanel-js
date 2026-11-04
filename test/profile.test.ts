@@ -121,6 +121,7 @@ describe("a trace's profile", () => {
     expect(result.profile).toEqual({
       interval_us: 1000,
       samples: expect.any(Number),
+      bucket_us: 10_000,
       frames: expect.any(Array),
       stacks: expect.any(Array),
       gc: { collections: expect.any(Number), pause_us: expect.any(Number), pauses: expect.any(Array) },
@@ -136,11 +137,46 @@ describe("a trace's profile", () => {
 
     const total = result.profile?.stacks.reduce((sum, stack) => sum + stack.count, 0);
     expect(total).toBe(result.profile?.samples);
+    // Each stack's samples by the 10 ms of the trace they were taken in, adding up to its count.
+    expect(result.profile?.stacks.map((stack) => (stack.at ?? []).reduce((sum, [, count]) => sum + count, 0))).toEqual(
+      result.profile?.stacks.map((stack) => stack.count),
+    );
     expect(result.attrs["tracepanel.dropped_samples"]).toBeUndefined();
-    // No frame of this package's own, and none of an idle loop.
+    // No frame of this package's own, and none of V8's idle loop: its samples are the waiting frame's.
     expect(result.profile?.frames.filter((frame) => frame.function === "(idle)" || frame.file.startsWith(OWN))).toEqual(
       [],
     );
+  });
+
+  it("says when each stack ran: the code before a timer, the idle loop waiting through it, the code after", async () => {
+    const { start, end } = app();
+    const span = start("/timer", true);
+    await context.with(trace.setSpan(context.active(), span), async () => {
+      crunchPrices(30);
+      await pause(50);
+      crunchOrders(30);
+    });
+    const result = await end(span, "/timer");
+
+    const profile = result.profile;
+    const buckets = (name: string) =>
+      (profile?.stacks ?? [])
+        .filter((stack) => stack.frames.some((index) => profile?.frames[index]?.function === name))
+        .flatMap((stack) => (stack.at ?? []).map(([bucket]) => bucket));
+    const waiting = profile?.frames.findIndex((frame) => frame.waiting) ?? -1;
+    const waited = profile?.stacks.find((stack) => stack.frames.length === 1 && stack.frames[0] === waiting);
+    expect(profile?.frames[waiting]).toEqual({
+      function: "event loop",
+      module: null,
+      file: "",
+      line: 0,
+      in_app: false,
+      waiting: true,
+    });
+    expect(waited?.count).toBeGreaterThanOrEqual(20);
+    expect(Math.max(...buckets("crunchPrices"))).toBeLessThan(Math.min(...buckets("crunchOrders")));
+    // The timer's 50 ms: buckets the loop waited in, between the code's.
+    expect((waited?.at ?? []).some(([bucket]) => bucket > Math.max(...buckets("crunchPrices")))).toBe(true);
   });
 
   it("is taken when the framework's context says the request asked (Next.js)", async () => {

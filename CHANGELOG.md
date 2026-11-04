@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- A trace's profile says when each stack ran: each sample counts in the
+  10 ms of the trace it was taken in (`bucket_us`, a stack's `at`), by
+  V8's own time of it. The idle event loop's samples (the request
+  waiting on I/O or a timer) are kept as one waiting stack ("event
+  loop") instead of left out. The console splits a Node trace's time by
+  them as it does every language's: a query is Database, the code's own
+  time Your code, the framework's or Waiting, and the strip's legend and
+  the Profile tab's bar give the same numbers.
+
 ## 0.13.1 (2026-11-03)
 
 ### Added
