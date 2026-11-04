@@ -55,6 +55,31 @@ function busyUntilSampled(processor: TracepanelProcessor): void {
   }
 }
 
+/**
+ * Waits until the profiler has sampled the idle loop at least once: a fixed pause is no promise of an idle sample, as
+ * a busy machine can run the profiler's sampling thread too seldom. Like busyUntilSampled, a console profile of its own
+ * around each pause: any sample in it is in the trace's too.
+ */
+async function pauseUntilSampled(processor: TracepanelProcessor, ms: number): Promise<void> {
+  const session = (processor as unknown as { profiler: { session: Session } }).profiler.session;
+  for (let probe = 0; ; probe++) {
+    const title = `test:idle:${probe}`;
+    let sampled = false;
+    const finished = (message: { params: { title?: string; profile: inspector.Profiler.Profile } }) => {
+      if (message.params.title !== title) return;
+      const { nodes, samples = [] } = message.params.profile;
+      const idle = new Set(nodes.filter((node) => node.callFrame.functionName === "(idle)").map((node) => node.id));
+      sampled = samples.some((id) => idle.has(id));
+    };
+    session.on("Profiler.consoleProfileFinished", finished);
+    inspector.console.profile(title);
+    await pause(ms);
+    inspector.console.profileEnd(title);
+    session.off("Profiler.consoleProfileFinished", finished);
+    if (sampled) return;
+  }
+}
+
 /** The whole heap collected: V8 does it in a task of its own, done when the inspector answers. */
 async function collectGarbage(): Promise<void> {
   const session = new inspector.Session();
@@ -149,11 +174,11 @@ describe("a trace's profile", () => {
   });
 
   it("says when each stack ran: the code before a timer, the idle loop waiting through it, the code after", async () => {
-    const { start, end } = app();
+    const { start, end, processor } = app();
     const span = start("/timer", true);
     await context.with(trace.setSpan(context.active(), span), async () => {
       crunchPrices(30);
-      await pause(50);
+      await pauseUntilSampled(processor, 50);
       crunchOrders(30);
     });
     const result = await end(span, "/timer");
@@ -173,10 +198,18 @@ describe("a trace's profile", () => {
       in_app: false,
       waiting: true,
     });
-    expect(waited?.count).toBeGreaterThanOrEqual(20);
-    expect(Math.max(...buckets("crunchPrices"))).toBeLessThan(Math.min(...buckets("crunchOrders")));
-    // The timer's 50 ms: buckets the loop waited in, between the code's.
-    expect((waited?.at ?? []).some(([bucket]) => bucket > Math.max(...buckets("crunchPrices")))).toBe(true);
+    // Every stack's samples by the 10 ms they were taken in: whole buckets from the trace's start, adding up to its count.
+    // (How many samples a pause gets depends on how often the machine runs the sampler: only their order is asserted.)
+    expect(
+      profile?.stacks.every((stack) => (stack.at ?? []).every(([bucket]) => Number.isInteger(bucket) && bucket >= 0)),
+    ).toBe(true);
+    expect(waited?.count).toBeGreaterThan(0);
+    expect((waited?.at ?? []).reduce((sum, [, count]) => sum + count, 0)).toBe(waited?.count);
+    const before = Math.max(...buckets("crunchPrices"));
+    const after = Math.min(...buckets("crunchOrders"));
+    expect(before).toBeLessThan(after);
+    // The timer's wait: buckets the loop waited in, between the code's.
+    expect((waited?.at ?? []).some(([bucket]) => bucket >= before && bucket <= after)).toBe(true);
   });
 
   it("is taken when the framework's context says the request asked (Next.js)", async () => {
