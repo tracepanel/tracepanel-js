@@ -196,6 +196,40 @@ function loadEndUs(): number {
   return entry?.loadEventEnd ? toUs(entry.loadEventEnd) : nowUs();
 }
 
+/**
+ * The page's own document as a call of its load, from the browser's navigation timing: the request went before any
+ * script ran, so no traceparent linked it; the page names the trace that served it (the widget's tag, as every
+ * server SDK writes it). None where the page names none: a dev server's static page served no trace.
+ */
+function documentCall(root: Span): Span | undefined {
+  const tag = document.querySelector("script[data-tracepanel-id]");
+  const served = tag?.getAttribute("data-tracepanel-id");
+  const entry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  const url = safeUrl(entry?.name || location.href);
+  if (!served || !entry?.responseEnd || !url) return undefined;
+  const from = entry.requestStart || entry.startTime;
+  const method = (tag?.getAttribute("data-tracepanel-method") ?? "GET").toUpperCase();
+  const status = entry.responseStatus || Number(tag?.getAttribute("data-tracepanel-status")) || undefined;
+  return {
+    id: newId(),
+    parent_id: root.id,
+    kind: "http.client",
+    name: `${method} ${url.host}${url.pathname}`,
+    start: toUs(from),
+    duration: Math.max(0, Math.round((entry.responseEnd - from) * 1000)),
+    status: status !== undefined && status >= 500 ? "error" : "ok",
+    attrs: {
+      "http.request.method": method,
+      "url.full": url.toString(),
+      "url.scheme": url.protocol.replace(":", ""),
+      "server.address": url.hostname,
+      "server.port": Number(url.port) || (url.protocol === "https:" ? 443 : 80),
+      ...(status === undefined ? {} : { "http.response.status_code": status }),
+      "tracepanel.served_by": served,
+    },
+  };
+}
+
 function safeUrl(raw: string): URL | undefined {
   try {
     const url = new URL(raw, location.href);
@@ -490,6 +524,9 @@ export function record(options: BrowserOptions = {}): void {
       span.attrs["http.unfinished"] = true;
     }
     current.open.clear();
+    // The page's load: its own document first among its calls.
+    const own = current.trace.attrs["page.trigger"] === "load" ? documentCall(current.root) : undefined;
+    if (own) current.trace.spans.splice(1, 0, own);
     // Until its last call answered, not the quiet second after: a view, until the page's load too.
     const lastSpan = Math.max(...current.trace.spans.map((span) => span.start + span.duration));
     let end = Math.max(current.endUs, lastSpan, current.trace.start);
