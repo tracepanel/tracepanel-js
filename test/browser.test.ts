@@ -80,6 +80,15 @@ beforeAll(() => {
   // The helper's folder stands for a dev server's own scripts (/@vite/ under Vite).
   // (Vitest runs from the project's root; the page's import.meta.url isn't the file's.)
   const ignored = `${process.cwd()}/test/ignored/`;
+  // Served by an app with a server SDK: the widget's tag names the page's trace, the browser timed its document.
+  const tag = document.createElement("script");
+  tag.dataset["tracepanelId"] = "01PAGETRACE";
+  tag.dataset["tracepanelMethod"] = "GET";
+  document.head.append(tag);
+  const timing = { name: "http://app.test/books", startTime: 0, requestStart: 5, responseEnd: 25, responseStatus: 200 };
+  const entries = performance.getEntriesByType.bind(performance);
+  performance.getEntriesByType = ((type: string) =>
+    type === "navigation" ? [timing] : entries(type)) as typeof performance.getEntriesByType;
   record({ service: "shop-web", propagateTo: ["http://api.test"], ignoreSources: [ignored] });
 });
 
@@ -94,6 +103,24 @@ test("the page's load is a view, announced as it starts and as it ends", async (
   });
   expect(view.attrs["page.action"]).toBeUndefined();
   expect(announced.filter((item) => item.name === "/books").map((item) => item.open)).toEqual([true, false]);
+});
+
+test("the page's load has its own document as its first call, naming the trace that served it", async () => {
+  const view = await sentTrace("/books");
+  const [, document] = view.spans;
+
+  expect(document).toMatchObject({
+    kind: "http.client",
+    name: "GET app.test/books",
+    status: "ok",
+    attrs: {
+      "http.request.method": "GET",
+      "url.full": "http://app.test/books",
+      "http.response.status_code": 200,
+      "tracepanel.served_by": "01PAGETRACE",
+    },
+  });
+  expect((document as unknown as { duration: number }).duration).toBe(20_000);
 });
 
 test("a click that calls the API is an action named after its control, its call linked to the API's trace", async () => {
