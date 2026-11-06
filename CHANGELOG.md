@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0 (2026-11-06)
+
+Runs `tracepanel-agent` 0.15.0 (installed with it).
+
+### Added
+
+- A page's load has its own document as its first call, naming the trace
+  that served it: the view's call tree shows the request that rendered it.
+
+### Changed
+
+- Runs `tracepanel-agent` 0.15.0: the panel is one list, the open record's
+  call tree with the row picked and its details beside it.
+
 ## 0.14.0 (2026-11-04)
 
 ### Changed
