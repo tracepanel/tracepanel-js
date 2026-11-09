@@ -166,6 +166,22 @@ test("a wrapper of fetch around the recording's (the widget's) finds the action'
   expect(marked).toBe(action.id);
 });
 
+test("a click on the panel's widget is not the app's action: the call after it is not named after the widget", async () => {
+  const widget = document.createElement("tracepanel-widget");
+  widget.addEventListener("click", () => void fetch("/api/widget-after"));
+  document.body.append(widget);
+  widget.click();
+  let trace: Doc | undefined;
+  for (let waited = 0; !trace && waited < 5000; waited += 50) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    trace = sent.find((each) => each.spans.some((span) => span.name === "GET app.test/api/widget-after"));
+  }
+  widget.remove();
+
+  expect(trace?.attrs["page.trigger"]).not.toBe("click");
+  expect(sent.filter((each) => each.name.includes("tracepanel-widget"))).toEqual([]);
+});
+
 test("a traceparent goes to the page's origin and to propagateTo's, not to others", async () => {
   button("Sync", "http://api.test/sync").click();
   await sentTrace('/books › click "Sync"');

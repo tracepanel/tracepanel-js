@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A click on the panel's widget no longer starts an action: the app's
+  calls after it are not named after the widget.
+
 ## 0.15.1 (2026-11-09)
 
 ### Added

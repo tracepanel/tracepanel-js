@@ -611,7 +611,8 @@ export function record(options: BrowserOptions = {}): void {
     "click",
     (event) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (!target) return;
+      // The panel's own widget is not the app's: its clicks make no action.
+      if (!target || target.closest("tracepanel-widget")) return;
       const control = target.closest(CONTROL) ?? target;
       interaction = { trigger: "click", label: controlName(control), atMs: event.timeStamp || performance.now() };
     },
