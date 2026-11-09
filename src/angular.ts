@@ -11,14 +11,13 @@
 // made, before any of its services, and so before HttpClient makes a call. It puts the widget's script in the page,
 // gives the recording the errors Angular's ErrorHandler catches (an event handler's, a component's), which never
 // reach window, and names each view by the route the router matched ("/books/:id"). The console is the one the dev
-// server sends /__tracepanel__/ on to (proxy.conf.json).
+// server sends /__tracepanel__/ on to (proxy.conf.json). A production build leaves all of it out of its bundle.
 
 import { LocationStrategy } from "@angular/common";
 import {
   type EnvironmentProviders,
   ErrorHandler,
   inject,
-  isDevMode,
   makeEnvironmentProviders,
   NgZone,
   PLATFORM_ID,
@@ -41,6 +40,9 @@ export interface TracepanelAngularOptions {
   api?: string;
 }
 
+// Angular's: false in a production build, where its build defines it so.
+declare const ngDevMode: unknown;
+
 // The dev server's own client (Vite's, under the Angular CLI's dev server): its console output isn't the page's.
 const DEV_SOURCES = ["/@vite/"];
 
@@ -48,19 +50,26 @@ const DEV_SOURCES = ["/@vite/"];
 export function provideTracepanel(options: TracepanelAngularOptions = {}): EnvironmentProviders {
   return makeEnvironmentProviders([
     provideEnvironmentInitializer(() => {
-      if (!isDevMode() || inject(PLATFORM_ID) !== "browser") return;
-      const api = options.api ?? "/__tracepanel__/";
-      const settings: BrowserOptions = { api, ignoreSources: DEV_SOURCES };
-      if (options.service !== undefined) settings.service = options.service;
-      if (options.propagateTo !== undefined) settings.propagateTo = options.propagateTo;
-      // Outside Angular's zone, where there is one: the recording's own listeners and timers aren't the app's work.
-      inject(NgZone).runOutsideAngular(() => record(settings));
-      widget(api);
-      catchErrors(inject(ErrorHandler));
-      // The router's routes, when the app has a router.
-      if (inject(ROUTES, { optional: true })) nameViews(inject(Router), inject(LocationStrategy).getBaseHref());
+      // isDevMode(), as Angular writes it: a production build defines ngDevMode as false, and so leaves the recording
+      // out of its bundle (enableProdMode() sets it false too).
+      if (typeof ngDevMode === "undefined" || ngDevMode) start(options);
     }),
   ]);
+}
+
+/** In the app's injector, as it is made: before any of its services, and so before HttpClient makes a call. */
+function start(options: TracepanelAngularOptions): void {
+  if (inject(PLATFORM_ID) !== "browser") return;
+  const api = options.api ?? "/__tracepanel__/";
+  const settings: BrowserOptions = { api, ignoreSources: DEV_SOURCES };
+  if (options.service !== undefined) settings.service = options.service;
+  if (options.propagateTo !== undefined) settings.propagateTo = options.propagateTo;
+  // Outside Angular's zone, where there is one: the recording's own listeners and timers aren't the app's work.
+  inject(NgZone).runOutsideAngular(() => record(settings));
+  widget(api);
+  catchErrors(inject(ErrorHandler));
+  // The router's routes, when the app has a router.
+  if (inject(ROUTES, { optional: true })) nameViews(inject(Router), inject(LocationStrategy).getBaseHref());
 }
 
 /** The widget's script, after the recording started: its fetch() wraps the recording's. Once per page. */
