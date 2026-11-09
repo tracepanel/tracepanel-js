@@ -33,7 +33,7 @@ It runs while you develop, and everything stays on your machine.
 | **Errors** | Thrown in a handler, with your frames, their source and, on Node, their local variables. |
 | **Profiling** | Where a request's CPU time goes, and its memory and garbage collections when you ask for them, on Node. |
 | **Tests** | Vitest 4.1 and later: a test fails when it makes an N+1 or duplicate queries. |
-| **Browser** | The badge and its panel on server-rendered pages, in Next.js through `<Tracepanel />` and in an SPA through the Vite plugin. The pages' views and clicks with their `fetch()` calls, linked to the API's traces. |
+| **Browser** | The badge and its panel on server-rendered pages, in Next.js through `<Tracepanel />`, in an SPA through the Vite plugin, and in Angular 20 and later through `provideTracepanel()`. The pages' views and clicks with their `fetch()` calls, linked to the API's traces. |
 
 The settings and what each integration records are in the
 [JavaScript docs](https://tracepanel.dev/docs/javascript).
@@ -306,6 +306,35 @@ tracepanel({ dir: "../backend", browser: { service: "shop-web", propagateTo: ["h
 
 `browser: false` leaves the recording out. Without Vite, call `record()` from
 `@tracepanel/js/browser` in the page.
+
+### Angular
+
+An Angular app gets the badge and the recording from `provideTracepanel()`,
+in a development build only:
+
+```ts
+// app.config.ts
+import { provideTracepanel } from "@tracepanel/js/angular";
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideRouter(routes), provideHttpClient(), provideTracepanel({ service: "shop-web" })],
+};
+```
+
+Each view is named by its route, such as `/books/:id`, and the errors
+Angular's `ErrorHandler` catches fail the click that threw them. `ng serve`
+sends `/__tracepanel__/` on to the console, here a backend that serves it
+(Python, Spring Boot, Next.js), with `ng serve --proxy-config proxy.conf.json`:
+
+```json
+{
+  "/api": { "target": "http://127.0.0.1:8000" },
+  "/__tracepanel__": { "target": "http://127.0.0.1:8000" }
+}
+```
+
+Behind an Express or another Node.js API, the console is the agent's own. See
+the [Angular docs](https://tracepanel.dev/docs/javascript/angular).
 
 ## What it looks like
 

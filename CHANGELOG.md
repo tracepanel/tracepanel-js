@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `@tracepanel/js/angular`: `provideTracepanel()` records an Angular app's
+  pages in development, each view named by its route, with the errors
+  Angular's `ErrorHandler` catches.
+
 ## 0.15.0 (2026-11-06)
 
 Runs `tracepanel-agent` 0.15.0 (installed with it).
