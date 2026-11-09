@@ -18,6 +18,10 @@
 // The page's widget shows them too: each view and action is announced on window ("tracepanel:page") when it starts
 // and when it ends, and each response carries the id of the one that made it (Symbol.for("tracepanel.page") on the
 // Response or the XMLHttpRequest), so the panel lists a page's requests under what the user did.
+//
+// A framework tells the recording what it knows and the page doesn't say: `route()` names the page by its route
+// ("/books/:id") once its router matched one, and `report()` gives it an error the framework caught before it reached
+// window (Angular's ErrorHandler). @tracepanel/js/angular calls both.
 
 export interface BrowserOptions {
   /** Where the console is, on the page's origin: "/__tracepanel__/". */
@@ -126,6 +130,37 @@ const PAGE = Symbol.for("tracepanel.page");
 // On globalThis: the latest views and actions announced, for a widget that starts listening after them.
 const ANNOUNCED = Symbol.for("tracepanel.pages");
 const ANNOUNCED_MAX = 50;
+// On globalThis: what route() and report() reach the recording by, whichever copy of this file started it (the one
+// the Vite plugin serves, the app's own bundle's).
+const RECORDING = Symbol.for("tracepanel.recording");
+
+interface Recording {
+  report(error: unknown): void;
+  route(template: string, title?: string): void;
+}
+
+function recording(): Recording | undefined {
+  return (globalThis as Record<symbol, Recording | undefined>)[RECORDING];
+}
+
+/**
+ * An error the app's framework caught before it reached window (Angular's ErrorHandler): it fails the view or the
+ * action it happened in, as an uncaught one does. One that reaches window too counts once. Nothing while the page
+ * isn't recorded.
+ */
+export function report(error: unknown): void {
+  recording()?.report(error);
+}
+
+/**
+ * The page's route as its router matched it, such as "/books/:id", and its title: the page's view, and what users do
+ * on it, are named by the route instead of the path ("/books/2"), so the console groups every book's page as one.
+ * Called once the route is matched; the page's path stays in `page.path`. Nothing while the page isn't recorded.
+ */
+export function route(template: string, title?: string): void {
+  recording()?.route(template, title);
+}
+
 // Calls this soon after a click or a submit are its action's; later ones are background.
 const INTERACTION_MS = 1000;
 const LABEL_LENGTH = 40;
@@ -442,11 +477,15 @@ export function record(options: BrowserOptions = {}): void {
   const own = frames(new Error().stack).at(-1)?.filename;
   let view: View | undefined;
   let interaction: Interaction | undefined;
+  // The route the router matched last (route()), for the path it matched it on.
+  let routed: { path: string; template: string; title: string | undefined } | undefined;
 
   /** A view (no action: the page's load, a route change) or an action on the page, from `startUs`. */
   function start(trigger: Trigger, action?: string, startUs = nowUs()): View {
     const path = location.pathname;
-    const name = action ? `${path} › ${action}` : path;
+    const matched = routed?.path === path ? routed : undefined;
+    const page = matched?.template ?? path;
+    const name = action ? `${page} › ${action}` : page;
     const root: Span = {
       id: newId(),
       parent_id: null,
@@ -471,8 +510,9 @@ export function record(options: BrowserOptions = {}): void {
           "service.role": "browser",
           "telemetry.sdk.language": "webjs",
           "page.path": path,
+          ...(matched ? { "page.route": matched.template } : {}),
           "page.url": `${location.origin}${path}`,
-          "page.title": document.title,
+          "page.title": matched?.title ?? document.title,
           "page.trigger": trigger,
           ...(action ? { "page.action": action } : {}),
           "user_agent.original": navigator.userAgent,
@@ -704,7 +744,18 @@ export function record(options: BrowserOptions = {}): void {
     return sendXhr.call(this, body);
   };
 
+  // Errors already recorded: one that reaches window and the app's framework too (Angular's ErrorHandler listens on
+  // window as well) counts once.
+  const recorded = new WeakSet<object>();
+
   function error(thrown: unknown): void {
+    if (typeof thrown === "object" && thrown !== null) {
+      if (recorded.has(thrown)) return;
+      recorded.add(thrown);
+      // A framework's own Error for an ErrorEvent with no error in it (a script of another origin): window's listener
+      // recorded the event's message already.
+      if (thrown instanceof Error && thrown.cause instanceof Event) return;
+    }
     const current = active();
     const err = thrown instanceof Error ? thrown : new Error(String(thrown));
     current.trace.errors.push({
@@ -735,7 +786,10 @@ export function record(options: BrowserOptions = {}): void {
           time: nowUs(),
           level,
           logger: "console",
-          message: args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "),
+          // An Error as it reads ("TypeError: …"): JSON has none of its fields (Angular's ErrorHandler logs one).
+          message: args
+            .map((arg) => (typeof arg === "string" ? arg : arg instanceof Error ? String(arg) : JSON.stringify(arg)))
+            .join(" "),
           exception: args.find((arg): arg is Error => arg instanceof Error)?.stack ?? null,
           attrs: from ? whereLogged(from) : {},
         });
@@ -767,6 +821,25 @@ export function record(options: BrowserOptions = {}): void {
   window.addEventListener("pagehide", () => {
     if (view) finish(view);
   });
+
+  (globalThis as Record<symbol, Recording>)[RECORDING] = {
+    report: error,
+    route(template, title) {
+      const path = location.pathname;
+      routed = { path, template, title };
+      // The view of this page (and what the user did on it) started before its router matched: named again, before
+      // it goes out.
+      const current = view;
+      if (!current || current.trace.attrs["page.path"] !== path) return;
+      const action = current.trace.attrs["page.action"];
+      const name = typeof action === "string" ? `${template} › ${action}` : template;
+      current.trace.name = name;
+      current.root.name = name;
+      current.trace.attrs["page.route"] = template;
+      current.trace.attrs["page.title"] = title ?? document.title;
+      announce(current.trace, true);
+    },
+  };
 
   // The first view started when the browser began loading the page.
   start("load", undefined, Math.round(performance.timeOrigin * 1000));
