@@ -786,7 +786,10 @@ export function record(options: BrowserOptions = {}): void {
           time: nowUs(),
           level,
           logger: "console",
-          message: args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "),
+          // An Error as it reads ("TypeError: …"): JSON has none of its fields (Angular's ErrorHandler logs one).
+          message: args
+            .map((arg) => (typeof arg === "string" ? arg : arg instanceof Error ? String(arg) : JSON.stringify(arg)))
+            .join(" "),
           exception: args.find((arg): arg is Error => arg instanceof Error)?.stack ?? null,
           attrs: from ? whereLogged(from) : {},
         });

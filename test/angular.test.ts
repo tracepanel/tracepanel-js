@@ -23,6 +23,7 @@ interface Doc {
   attrs: Record<string, unknown>;
   spans: { kind: string; name: string; parent_id: string | null; id: string; attrs: Record<string, unknown> }[];
   errors: { type: string; message: string; handled: boolean }[];
+  logs: { message: string }[];
 }
 
 const sent: Doc[] = [];
@@ -105,6 +106,8 @@ beforeAll(async () => {
         useValue: {
           handleError(error: unknown) {
             handled.push(error);
+            // biome-ignore lint/suspicious/noConsole: as Angular's own ErrorHandler logs it.
+            console.error("ERROR", error);
           },
         },
       },
@@ -152,6 +155,9 @@ test("an error Angular's ErrorHandler caught fails the click, and the app's hand
 
   expect(action.errors).toMatchObject([
     { type: "TypeError", message: "Cannot read properties of undefined (reading 'toUpperCase')", handled: false },
+  ]);
+  expect(action.logs.map((log) => log.message)).toEqual([
+    "ERROR TypeError: Cannot read properties of undefined (reading 'toUpperCase')",
   ]);
   expect(handled).toEqual([expect.any(TypeError)]);
 });
