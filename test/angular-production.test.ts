@@ -2,7 +2,7 @@
 // @vitest-environment-options {"url": "http://app.test/"}
 // @tracepanel/js/angular in a production build (isDevMode() false): nothing recorded, no widget, fetch untouched.
 import "@angular/compiler";
-import { Component, enableProdMode } from "@angular/core";
+import { Component, enableProdMode, provideZonelessChangeDetection } from "@angular/core";
 import { bootstrapApplication } from "@angular/platform-browser";
 import { provideRouter, RouterOutlet } from "@angular/router";
 import { expect, test } from "vitest";
@@ -18,7 +18,7 @@ test("a production build records nothing and puts no widget in the page", async 
   document.head.append(base);
   document.body.append(document.createElement("app-root"));
   const app = await bootstrapApplication(App, {
-    providers: [provideRouter([]), provideTracepanel({ service: "library-web" })],
+    providers: [provideZonelessChangeDetection(), provideRouter([]), provideTracepanel({ service: "library-web" })],
   });
 
   expect(window.fetch).toBe(fetch);

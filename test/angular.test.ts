@@ -11,6 +11,7 @@ import {
   ErrorHandler,
   inject,
   provideBrowserGlobalErrorListeners,
+  provideZonelessChangeDetection,
 } from "@angular/core";
 import { bootstrapApplication } from "@angular/platform-browser";
 import { provideRouter, Router, RouterOutlet } from "@angular/router";
@@ -90,6 +91,8 @@ beforeAll(async () => {
   document.body.append(document.createElement("app-root"));
   app = await bootstrapApplication(App, {
     providers: [
+      // Angular 20 and 21 still default to zone.js.
+      provideZonelessChangeDetection(),
       provideBrowserGlobalErrorListeners(),
       provideRouter([
         { path: "", component: Books, title: "Books" },
