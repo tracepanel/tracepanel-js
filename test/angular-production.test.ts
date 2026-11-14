@@ -2,15 +2,19 @@
 // @vitest-environment-options {"url": "http://app.test/"}
 // @tracepanel/js/angular in a production build (isDevMode() false): nothing recorded, no widget, fetch untouched.
 import "@angular/compiler";
-import { Component, enableProdMode, provideZonelessChangeDetection } from "@angular/core";
+import { Component, enableProdMode } from "@angular/core";
 import { bootstrapApplication } from "@angular/platform-browser";
 import { provideRouter, RouterOutlet } from "@angular/router";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { provideTracepanel } from "../src/angular.js";
+import { zoneless } from "./angular-change-detection.js";
 
 const App = Component({ selector: "app-root", imports: [RouterOutlet], template: "<router-outlet />" })(class {});
+afterEach(() => vi.unstubAllGlobals());
 
 test("a production build records nothing and puts no widget in the page", async () => {
+  // Angular CLI defines this in browser builds. This test runs the packages directly.
+  vi.stubGlobal("ngServerMode", false);
   const fetch = window.fetch;
   enableProdMode();
   const base = document.createElement("base");
@@ -18,7 +22,7 @@ test("a production build records nothing and puts no widget in the page", async 
   document.head.append(base);
   document.body.append(document.createElement("app-root"));
   const app = await bootstrapApplication(App, {
-    providers: [provideZonelessChangeDetection(), provideRouter([]), provideTracepanel({ service: "library-web" })],
+    providers: [zoneless(), provideRouter([]), provideTracepanel({ service: "library-web" })],
   });
 
   expect(window.fetch).toBe(fetch);

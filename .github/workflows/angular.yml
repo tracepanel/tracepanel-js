@@ -1,0 +1,56 @@
+name: Angular compatibility
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: angular-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  angular:
+    name: Angular ${{ matrix.angular }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - angular: '20.0'
+            zone: '~0.15.1'
+          - angular: '20.3'
+            zone: '~0.15.1'
+          - angular: '21'
+            zone: '~0.15.1'
+          - angular: '22'
+            zone: '~0.16.3'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the supported Angular version
+        run: >-
+          pnpm add -D
+          @angular/common@${{ matrix.angular }} @angular/compiler@${{ matrix.angular }}
+          @angular/core@${{ matrix.angular }} @angular/platform-browser@${{ matrix.angular }}
+          @angular/router@${{ matrix.angular }} zone.js@${{ matrix.zone }}
+      - name: Zoneless, lifecycle, server safety, and production gate
+        run: pnpm exec vitest run test/angular.test.ts test/angular-production.test.ts test/angular-lifecycle.test.ts test/angular-ngmodule.test.ts
+      - name: HttpClient on XHR
+        run: pnpm exec vitest run test/angular.test.ts
+        env:
+          TRACEPANEL_ANGULAR_HTTP: xhr
+      - name: Recording and NgModule with Zone.js
+        run: pnpm exec vitest run test/angular.test.ts test/angular-ngmodule.test.ts
+        env:
+          TRACEPANEL_ANGULAR_ZONE: '1'
+      - name: XHR with Zone.js
+        run: pnpm exec vitest run test/angular.test.ts
+        env:
+          TRACEPANEL_ANGULAR_ZONE: '1'
+          TRACEPANEL_ANGULAR_HTTP: xhr
