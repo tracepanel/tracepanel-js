@@ -328,10 +328,38 @@ sends `/__tracepanel__/` on to the console, here a backend that serves it
 
 ```json
 {
-  "/api": { "target": "http://127.0.0.1:8000" },
-  "/__tracepanel__": { "target": "http://127.0.0.1:8000" }
+  "/api/**": { "target": "http://127.0.0.1:8000" },
+  "/__tracepanel__/**": { "target": "http://127.0.0.1:8000" }
 }
 ```
+
+The adapter supports Angular 20 and later with Zone.js or zoneless change
+detection, and HttpClient on fetch or XHR. Angular's CLI manages Vite internally;
+use the provider and the CLI proxy, without the Tracepanel Vite plugin. The
+browser recorder has no Angular dependency. The adapter adds route names,
+Angular error handling, and initialization.
+
+For an NgModule application, add the same provider to its root module:
+
+```ts
+import { NgModule } from "@angular/core";
+import { provideTracepanel } from "@tracepanel/js/angular";
+
+@NgModule({
+  providers: [provideTracepanel({ service: "shop-web" })],
+})
+export class AppModule {}
+```
+
+The provider does nothing during server rendering. It records only in development;
+a production Angular CLI build removes the browser recording and widget. Existing
+error handlers still receive the original error. Repeated providers in one injector
+start once. The first provider's options apply.
+
+The [Angular frontend example](https://github.com/tracepanel/tracepanel-examples/tree/main/angular-app)
+runs independently against the library API. The
+[Angular and Spring example](https://github.com/tracepanel/tracepanel-examples/tree/main/angular-spring-boot)
+starts the full stack.
 
 Behind an Express or another Node.js API, the console is the agent's own. See
 the [Angular docs](https://tracepanel.dev/docs/javascript/angular).

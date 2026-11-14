@@ -15,6 +15,8 @@
 
 import { LocationStrategy } from "@angular/common";
 import {
+  DestroyRef,
+  EnvironmentInjector,
   type EnvironmentProviders,
   ErrorHandler,
   inject,
@@ -23,7 +25,8 @@ import {
   PLATFORM_ID,
   provideEnvironmentInitializer,
 } from "@angular/core";
-import { type ActivatedRouteSnapshot, NavigationEnd, ROUTES, Router } from "@angular/router";
+import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import { type ActivatedRouteSnapshot, NavigationEnd, PRIMARY_OUTLET, ROUTES, Router } from "@angular/router";
 import { type BrowserOptions, record, report, route } from "./browser.js";
 
 export { report };
@@ -45,6 +48,7 @@ declare const ngDevMode: unknown;
 
 // The dev server's own client (Vite's, under the Angular CLI's dev server): its console output isn't the page's.
 const DEV_SOURCES = ["/@vite/"];
+const started = new WeakSet<EnvironmentInjector>();
 
 /** The recording, the widget, ErrorHandler's errors and the views' routes, in a development build in a browser. */
 export function provideTracepanel(options: TracepanelAngularOptions = {}): EnvironmentProviders {
@@ -60,7 +64,11 @@ export function provideTracepanel(options: TracepanelAngularOptions = {}): Envir
 /** In the app's injector, as it is made: before any of its services, and so before HttpClient makes a call. */
 function start(options: TracepanelAngularOptions): void {
   if (inject(PLATFORM_ID) !== "browser") return;
-  const api = options.api ?? "/__tracepanel__/";
+  const injector = inject(EnvironmentInjector);
+  if (started.has(injector)) return;
+  started.add(injector);
+  const endpoint = options.api ?? "/__tracepanel__/";
+  const api = endpoint.endsWith("/") ? endpoint : `${endpoint}/`;
   const settings: BrowserOptions = { api, ignoreSources: DEV_SOURCES };
   if (options.service !== undefined) settings.service = options.service;
   if (options.propagateTo !== undefined) settings.propagateTo = options.propagateTo;
@@ -87,17 +95,21 @@ function widget(api: string): void {
  * first: Angular catches what an event handler or a component throws, and it never reaches window.
  */
 function catchErrors(handler: ErrorHandler): void {
-  const handle = handler.handleError.bind(handler);
-  handler.handleError = (error: unknown) => {
+  const handle = handler.handleError;
+  const wrapped = (error: unknown) => {
     report(error);
-    handle(error);
+    handle.call(handler, error);
   };
+  handler.handleError = wrapped;
+  inject(DestroyRef).onDestroy(() => {
+    if (handler.handleError === wrapped) handler.handleError = handle;
+  });
 }
 
 /** Each navigation's view named by the route it matched, under the app's base href, and that route's title. */
 function nameViews(router: Router, baseHref: string): void {
   const base = baseHref.replace(/\/$/, "");
-  router.events.subscribe((event) => {
+  router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
     if (!(event instanceof NavigationEnd)) return;
     const { template, title } = matched(router.routerState.snapshot.root);
     route(`${base}${template}`, title);
@@ -108,10 +120,12 @@ function nameViews(router: Router, baseHref: string): void {
 function matched(root: ActivatedRouteSnapshot): { template: string; title: string | undefined } {
   const parts: string[] = [];
   let title: string | undefined;
-  for (let node: ActivatedRouteSnapshot | null = root; node; node = node.firstChild) {
+  let node: ActivatedRouteSnapshot | undefined = root;
+  while (node) {
     const path = node.routeConfig?.path;
     if (path) parts.push(path);
     title = node.title ?? title;
+    node = node.children.find((child) => child.outlet === PRIMARY_OUTLET);
   }
   return { template: `/${parts.join("/")}`, title };
 }
