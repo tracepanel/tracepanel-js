@@ -33,7 +33,9 @@ async function bootstrap(providers: Parameters<typeof bootstrapApplication>[1] =
 
 test("duplicate providers start once and restore the original error handler on destroy", async () => {
   const handler = new ErrorHandler();
-  const original = vi.fn();
+  const original = vi.fn(function (this: ErrorHandler) {
+    expect(this).toBe(handler);
+  });
   handler.handleError = original;
   const app = await bootstrap({
     providers: [
@@ -94,4 +96,14 @@ test("route naming follows the primary outlet and stops when the app is destroye
   apps.splice(apps.indexOf(app), 1);
   events.next(new NavigationEnd(2, "/books/3", "/books/3"));
   expect(route).toHaveBeenCalledTimes(1);
+});
+
+test("teardown preserves an error handler installed after Tracepanel", async () => {
+  const handler = new ErrorHandler();
+  const app = await bootstrap({ providers: [{ provide: ErrorHandler, useValue: handler }, provideTracepanel()] });
+  const replacement = vi.fn();
+  handler.handleError = replacement;
+  app.destroy();
+  apps.splice(apps.indexOf(app), 1);
+  expect(handler.handleError).toBe(replacement);
 });
