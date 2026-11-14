@@ -580,6 +580,22 @@ names are OpenTelemetry's: `postgresql`, `mysql`, `sqlite`, `mongodb`.
 | `tracepanel dev` | runs the agent in the foreground, with the console on http://127.0.0.1:8765/ |
 | `tracepanel mcp` | gives an AI coding agent your traces over MCP |
 
+## Development checks
+
+```bash
+pnpm lint
+pnpm test
+pnpm build
+pnpm fallow audit --changed-since origin/main
+```
+
+Fallow checks changed code for unused code, complexity, and duplication. CI
+reports its findings without blocking a PR. Public entry points come from
+`package.json` exports and the CLI binary. No manual entry list is needed.
+Use `pnpm fallow dead-code` to inspect the whole repository. Its findings need
+review before removing code. The Fallow npm launcher requires Node.js 22 or later;
+the analysis job uses Node.js 24.
+
 ## Documentation
 
 The documentation is at
