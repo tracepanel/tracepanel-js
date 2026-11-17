@@ -333,6 +333,10 @@ sends `/__tracepanel__/` on to the console, here a backend that serves it
 }
 ```
 
+Angular 20 and later, zoneless or on Zone.js, HttpClient on fetch or XHR. An
+NgModule app adds the same provider to its root module's `providers`. On the
+server, and in a production build, it does nothing.
+
 Behind an Express or another Node.js API, the console is the agent's own. See
 the [Angular docs](https://tracepanel.dev/docs/javascript/angular).
 

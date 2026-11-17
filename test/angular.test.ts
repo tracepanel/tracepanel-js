@@ -4,6 +4,7 @@
 // widget in the page, the views named by their routes, the errors ErrorHandler catches, HttpClient's calls under the
 // click that made them. One app for the page, as in a browser: the tests follow one another on it.
 import "@angular/compiler";
+import * as http from "@angular/common/http";
 import { HttpClient, provideHttpClient, withFetch } from "@angular/common/http";
 import {
   type ApplicationRef,
@@ -11,12 +12,16 @@ import {
   ErrorHandler,
   inject,
   provideBrowserGlobalErrorListeners,
-  provideZonelessChangeDetection,
+  provideZoneChangeDetection,
 } from "@angular/core";
 import { bootstrapApplication } from "@angular/platform-browser";
 import { provideRouter, Router, RouterOutlet } from "@angular/router";
-import { beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { provideTracepanel } from "../src/angular.js";
+import { zoneless } from "./angular-change-detection.js";
+
+const zoned = process.env["TRACEPANEL_ANGULAR_ZONE"] === "1";
+if (zoned) await import("zone.js");
 
 interface Doc {
   name: string;
@@ -65,8 +70,7 @@ const BookPage = Component({
     }
 
     share(): void {
-      const book = {} as { isbn: string };
-      void book.isbn.toUpperCase();
+      throw new TypeError("Missing ISBN.");
     }
   },
 );
@@ -75,7 +79,45 @@ const Books = Component({ selector: "app-books", template: "<p>Books</p>" })(cla
 
 const App = Component({ selector: "app-root", imports: [RouterOutlet], template: "<router-outlet />" })(class {});
 
+afterAll(() => {
+  app?.destroy();
+  vi.restoreAllMocks();
+});
+
 beforeAll(async () => {
+  const features: Parameters<typeof provideHttpClient> = [withFetch()];
+  if (process.env["TRACEPANEL_ANGULAR_HTTP"] === "xhr") {
+    features.length = 0;
+    if ("withXhr" in http) features.push(http.withXhr());
+    const opened = new WeakMap<XMLHttpRequest, Request>();
+    vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(function (this: XMLHttpRequest, method, url) {
+      opened.set(this, new Request(new URL(url, location.href), { method }));
+    });
+    vi.spyOn(XMLHttpRequest.prototype, "setRequestHeader").mockImplementation(function (
+      this: XMLHttpRequest,
+      name,
+      value,
+    ) {
+      opened.get(this)?.headers.set(name, value);
+    });
+    vi.spyOn(XMLHttpRequest.prototype, "getAllResponseHeaders").mockReturnValue("Content-Type: application/json\r\n");
+    vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(function (this: XMLHttpRequest) {
+      const request = opened.get(this);
+      if (!request) throw new Error("XHR was not opened");
+      requests.push(request);
+      Object.defineProperties(this, {
+        status: { value: 200, configurable: true },
+        response: { value: "{}", configurable: true },
+        responseText: { value: "{}", configurable: true },
+        responseURL: { value: request.url, configurable: true },
+        readyState: { value: 4, configurable: true },
+      });
+      queueMicrotask(() => {
+        this.dispatchEvent(new ProgressEvent("load"));
+        this.dispatchEvent(new ProgressEvent("loadend"));
+      });
+    });
+  }
   // The page's network: the console takes the traces, the API answers.
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
@@ -92,15 +134,13 @@ beforeAll(async () => {
   document.body.append(document.createElement("app-root"));
   app = await bootstrapApplication(App, {
     providers: [
-      // Angular 20 and 21 still default to zone.js.
-      provideZonelessChangeDetection(),
+      zoned ? provideZoneChangeDetection() : zoneless(),
       provideBrowserGlobalErrorListeners(),
       provideRouter([
         { path: "", component: Books, title: "Books" },
         { path: "books/:id", component: BookPage, title: "A book" },
       ]),
-      // HttpClient on fetch(): its backend looks fetch up as it calls.
-      provideHttpClient(withFetch()),
+      provideHttpClient(...features),
       {
         provide: ErrorHandler,
         useValue: {
@@ -153,12 +193,8 @@ test("an error Angular's ErrorHandler caught fails the click, and the app's hand
   button("Share").click();
   const action = await sentTrace('/books/:id › click "Share"');
 
-  expect(action.errors).toMatchObject([
-    { type: "TypeError", message: "Cannot read properties of undefined (reading 'toUpperCase')", handled: false },
-  ]);
-  expect(action.logs.map((log) => log.message)).toEqual([
-    "ERROR TypeError: Cannot read properties of undefined (reading 'toUpperCase')",
-  ]);
+  expect(action.errors).toMatchObject([{ type: "TypeError", message: "Missing ISBN.", handled: false }]);
+  expect(action.logs.map((log) => log.message)).toEqual(["ERROR TypeError: Missing ISBN."]);
   expect(handled).toEqual([expect.any(TypeError)]);
 });
 
