@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"settings":{"disableJavaScriptFileLoading":true,"handleDisabledFileLoadingAsSuccess":true}}
+// @tracepanel/js/angular over an app's life: listed twice it starts once, on the server not at all; the app destroyed,
+// ErrorHandler and the router are as they were. Views are named down the primary outlet. The recording is mocked.
 import "@angular/compiler";
 import { LocationStrategy } from "@angular/common";
 import { type ApplicationRef, Component, ErrorHandler, PLATFORM_ID } from "@angular/core";

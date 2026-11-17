@@ -48,6 +48,8 @@ declare const ngDevMode: unknown;
 
 // The dev server's own client (Vite's, under the Angular CLI's dev server): its console output isn't the page's.
 const DEV_SOURCES = ["/@vite/"];
+// The injectors it started in: a provider listed twice (a library's and the app's) starts once, with the first's
+// options.
 const started = new WeakSet<EnvironmentInjector>();
 
 /** The recording, the widget, ErrorHandler's errors and the views' routes, in a development build in a browser. */
@@ -67,6 +69,7 @@ function start(options: TracepanelAngularOptions): void {
   const injector = inject(EnvironmentInjector);
   if (started.has(injector)) return;
   started.add(injector);
+  // The console's path, written with its slash or without.
   const endpoint = options.api ?? "/__tracepanel__/";
   const api = endpoint.endsWith("/") ? endpoint : `${endpoint}/`;
   const settings: BrowserOptions = { api, ignoreSources: DEV_SOURCES };
@@ -92,7 +95,8 @@ function widget(api: string): void {
 
 /**
  * The app's ErrorHandler, whichever it is (Angular's, Sentry's, the app's own), passes each error to the recording
- * first: Angular catches what an event handler or a component throws, and it never reaches window.
+ * first: Angular catches what an event handler or a component throws, and it never reaches window. The app destroyed,
+ * its handler is as it was, unless another took its place since.
  */
 function catchErrors(handler: ErrorHandler): void {
   const handle = handler.handleError;
@@ -106,7 +110,10 @@ function catchErrors(handler: ErrorHandler): void {
   });
 }
 
-/** Each navigation's view named by the route it matched, under the app's base href, and that route's title. */
+/**
+ * Each navigation's view named by the route it matched, under the app's base href, and that route's title, until the
+ * app is destroyed.
+ */
 function nameViews(router: Router, baseHref: string): void {
   const base = baseHref.replace(/\/$/, "");
   router.events.pipe(takeUntilDestroyed()).subscribe((event) => {

@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"url":"http://app.test/","settings":{"disableJavaScriptFileLoading":true,"handleDisabledFileLoadingAsSuccess":true}}
+// @tracepanel/js/angular in an NgModule app: the provider in its root module starts the recording, zoneless or on
+// Zone.js (TRACEPANEL_ANGULAR_ZONE=1).
 import "@angular/compiler";
 import { Component, NgModule, provideZoneChangeDetection } from "@angular/core";
 import { BrowserModule, platformBrowser } from "@angular/platform-browser";
