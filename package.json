@@ -83,8 +83,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "biome check . && tsc --noEmit",
-    "fmt": "biome check --write .",
-    "fallow": "fallow"
+    "fmt": "biome check --write ."
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
