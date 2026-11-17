@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `@tracepanel/js/angular`: a view is named by its primary outlet's route,
+  an auxiliary outlet aside. The provider starts once per injector and gives
+  `ErrorHandler` and the router back when the app is destroyed.
+
 ## 0.16.0 (2026-11-10)
 
 Runs `tracepanel-agent` 0.16.0 (installed with it).
