@@ -24,6 +24,7 @@ import {
   NgZone,
   PLATFORM_ID,
   provideEnvironmentInitializer,
+  VERSION,
 } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { type ActivatedRouteSnapshot, NavigationEnd, PRIMARY_OUTLET, ROUTES, Router } from "@angular/router";
@@ -72,23 +73,29 @@ function start(options: TracepanelAngularOptions): void {
   // The console's path, written with its slash or without.
   const endpoint = options.api ?? "/__tracepanel__/";
   const api = endpoint.endsWith("/") ? endpoint : `${endpoint}/`;
-  const settings: BrowserOptions = { api, ignoreSources: DEV_SOURCES };
+  // What the page runs, for the console and the widget's pill: Angular, not the API its calls reach.
+  const framework = `Angular ${VERSION.full}`;
+  const settings: BrowserOptions = { api, ignoreSources: DEV_SOURCES, framework };
   if (options.service !== undefined) settings.service = options.service;
   if (options.propagateTo !== undefined) settings.propagateTo = options.propagateTo;
   // Outside Angular's zone, where there is one: the recording's own listeners and timers aren't the app's work.
   inject(NgZone).runOutsideAngular(() => record(settings));
-  widget(api);
+  widget(api, `Browser · ${framework}`);
   catchErrors(inject(ErrorHandler));
   // The router's routes, when the app has a router.
   if (inject(ROUTES, { optional: true })) nameViews(inject(Router), inject(LocationStrategy).getBaseHref());
 }
 
-/** The widget's script, after the recording started: its fetch() wraps the recording's. Once per page. */
-function widget(api: string): void {
+/**
+ * The widget's script, after the recording started: its fetch() wraps the recording's. Once per page. `runtime` is what
+ * its pill says served the page, as a server SDK labels its pages: "Browser · Angular 22.0.1".
+ */
+function widget(api: string, runtime: string): void {
   if (document.querySelector("script[data-tracepanel-api]")) return;
   const script = document.createElement("script");
   script.src = `${api}widget.min.js`;
   script.dataset["tracepanelApi"] = api;
+  script.dataset["tracepanelRuntime"] = runtime;
   script.defer = true;
   document.head.append(script);
 }

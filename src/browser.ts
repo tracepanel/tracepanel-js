@@ -38,6 +38,11 @@ export interface BrowserOptions {
    * @tracepanel/js/vite and Next.js's `<Tracepanel />` set their own; a library's warnings still count (React's).
    */
   ignoreSources?: string[];
+  /**
+   * The page's framework and its version, "Angular 22.0.1": the console names the app by it, as it names a server's.
+   * @tracepanel/js/angular and @tracepanel/js/vite set it.
+   */
+  framework?: string;
 }
 
 type Attrs = Record<string, unknown>;
@@ -509,6 +514,7 @@ export function record(options: BrowserOptions = {}): void {
           "service.name": options.service ?? "browser",
           "service.role": "browser",
           "telemetry.sdk.language": "webjs",
+          ...(options.framework ? { "tracepanel.framework": options.framework } : {}),
           "page.path": path,
           ...(matched ? { "page.route": matched.template } : {}),
           "page.url": `${location.origin}${path}`,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- `@tracepanel/js/angular` and `@tracepanel/js/vite` name the page's framework
+  (Angular, React, Vue, Svelte, Solid, Preact; else Browser): the pill says it
+  served the page, not the API its calls reach, and the console names the app.
+
 ### Fixed
 
 - An agent another app had just started, or a busy one, keeps its address

@@ -13,6 +13,7 @@ import {
   inject,
   provideBrowserGlobalErrorListeners,
   provideZoneChangeDetection,
+  VERSION,
 } from "@angular/core";
 import { bootstrapApplication } from "@angular/platform-browser";
 import { provideRouter, Router, RouterOutlet } from "@angular/router";
@@ -156,12 +157,17 @@ beforeAll(async () => {
   });
 });
 
-test("the widget's script goes into the page once, with the console's address", () => {
+test("the widget's script goes into the page once, with the console's address and Angular as what served it", () => {
   const scripts = [...document.querySelectorAll<HTMLScriptElement>("script[data-tracepanel-api]")];
 
-  expect(scripts.map((script) => [script.getAttribute("src"), script.dataset["tracepanelApi"], script.defer])).toEqual([
-    ["/__tracepanel__/widget.min.js", "/__tracepanel__/", true],
-  ]);
+  expect(
+    scripts.map((script) => [
+      script.getAttribute("src"),
+      script.dataset["tracepanelApi"],
+      script.dataset["tracepanelRuntime"],
+      script.defer,
+    ]),
+  ).toEqual([["/__tracepanel__/widget.min.js", "/__tracepanel__/", `Browser · Angular ${VERSION.full}`, true]]);
 });
 
 test("the page's load is a view named by the route it matched, its path and title kept", async () => {
@@ -173,6 +179,7 @@ test("the page's load is a view named by the route it matched, its path and titl
     "page.route": "/books/:id",
     "page.title": "A book",
     "page.trigger": "load",
+    "tracepanel.framework": `Angular ${VERSION.full}`,
   });
 });
 
