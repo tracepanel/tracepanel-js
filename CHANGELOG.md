@@ -6,6 +6,8 @@
 
 - An agent another app had just started, or a busy one, keeps its address
   files: the SDK no longer removes them when its hello fails, so apps reach it.
+- The console proxy (Vite, Next.js) no longer answers a bare 502: a 503 says
+  why there is no console and what to do, as a page that reloads itself.
 
 ## 0.16.1 (2026-11-19)
 

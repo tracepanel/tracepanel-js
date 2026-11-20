@@ -3,7 +3,7 @@
 // from that origin into the root layout.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,29 @@ serveConsole(tracepanel);
 
 beforeEach(() => {
   for (const name of ["agent.addr", "console.addr"]) rmSync(join(store, name), { force: true });
+  process.env.TRACEPANEL_AGENT_BIN = FAKE;
+  delete process.env.TRACEPANEL_AGENT;
 });
+
+/** An agent that takes traces and serves no console (started without --serve): its address in the store. */
+async function agentWithoutConsole(): Promise<() => void> {
+  const agent = createTcpServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => agent.listen(0, "127.0.0.1", resolve));
+  writeFileSync(join(store, "agent.addr"), `tcp:127.0.0.1:${(agent.address() as AddressInfo).port}\n`);
+  return () => agent.close();
+}
+
+/** The proxy's answer: status, the headers that say when to come again, and the body. */
+async function answered(response: Response) {
+  return {
+    status: response.status,
+    type: response.headers.get("content-type"),
+    retryAfter: response.headers.get("retry-after"),
+    body: await response.text(),
+  };
+}
+
+const HTML = { accept: "text/html,application/xhtml+xml" };
 
 afterAll(() => {
   app.close();
@@ -140,4 +162,109 @@ test("outside development the layout gets nothing", () => {
   expect(Tracepanel()).toBeNull();
 
   (globalThis as Record<symbol, unknown>)[KEY] = tracepanel;
+});
+
+test("an agent that runs without its console: the page says to stop it, and reloads until the console answers", async () => {
+  const stop = await agentWithoutConsole();
+  try {
+    const page = await answered(await fetch(`${base}/__tracepanel__/`, { headers: HTML }));
+
+    expect(page).toEqual({ status: 503, type: "text/html; charset=utf-8", retryAfter: "2", body: expect.any(String) });
+    expect(page.body).toContain('<meta http-equiv="refresh" content="2">');
+    expect(page.body).toContain("<h1>Tracepanel&#39;s agent runs without its console</h1>");
+    expect(page.body).toContain(
+      `<p>The project&#39;s agent runs without its console (it was started without --serve). Stop it: the next request starts one with its console. Store: ${store}.</p>`,
+    );
+  } finally {
+    stop();
+  }
+});
+
+test("an agent that runs without its console, its console's address left over: the API gets why as JSON", async () => {
+  const stop = await agentWithoutConsole();
+  writeFileSync(join(store, "console.addr"), "http://127.0.0.1:9/\n");
+  try {
+    const answer = await answered(await fetch(`${base}/__tracepanel__/api/counts`));
+
+    expect(answer).toEqual({
+      status: 503,
+      type: "application/json",
+      retryAfter: "2",
+      body: JSON.stringify({
+        error: `The project's agent runs without its console (it was started without --serve). Stop it: the next request starts one with its console. Store: ${store}.`,
+      }),
+    });
+  } finally {
+    stop();
+  }
+});
+
+test("the agent is off: the answer says so", async () => {
+  process.env.TRACEPANEL_AGENT = "off";
+
+  const answer = await answered(await fetch(`${base}/__tracepanel__/api/counts`));
+
+  expect(answer).toEqual({
+    status: 503,
+    type: "application/json",
+    retryAfter: "2",
+    body: JSON.stringify({
+      error:
+        "Tracepanel's agent is off (TRACEPANEL_AGENT=off): traces aren't kept and there is no console. Unset TRACEPANEL_AGENT to have the app start it.",
+    }),
+  });
+});
+
+test("no agent binary to start: the answer says how to get one", async () => {
+  process.env.TRACEPANEL_AGENT_BIN = join(store, "no-such-agent");
+  try {
+    const answer = await answered(await fetch(`${base}/__tracepanel__/api/counts`));
+
+    expect(answer).toEqual({
+      status: 503,
+      type: "application/json",
+      retryAfter: "2",
+      body: JSON.stringify({
+        error: `TRACEPANEL_AGENT_BIN names ${join(store, "no-such-agent")}, which isn't there. Set it to the tracepanel-agent binary's path.`,
+      }),
+    });
+  } finally {
+    // It failed to start: this process would wait 30 s before it tries again.
+    (tracepanel as { starter: Starter }).starter = new Starter(store);
+  }
+});
+
+test("an agent that can't start: the answer points to its log", async () => {
+  process.env.FAKE_AGENT_FAIL = "1";
+  try {
+    const answer = await answered(await fetch(`${base}/__tracepanel__/api/counts`));
+
+    expect(answer).toEqual({
+      status: 503,
+      type: "application/json",
+      retryAfter: "2",
+      body: JSON.stringify({
+        error: `Tracepanel's agent didn't start: ${join(store, "agent.log")} says why. It is tried again within 30 seconds.`,
+      }),
+    });
+  } finally {
+    delete process.env.FAKE_AGENT_FAIL;
+    (tracepanel as { starter: Starter }).starter = new Starter(store);
+  }
+});
+
+test("a write to an agent that went away starts a new one, and is asked to come again", async () => {
+  writeFileSync(join(store, "console.addr"), "http://127.0.0.1:9/\n");
+  writeFileSync(join(store, "agent.addr"), "tcp:127.0.0.1:9\n");
+
+  const answer = await answered(await fetch(`${base}/__tracepanel__/api/browser`, { method: "POST", body: "[]" }));
+
+  expect(answer).toEqual({
+    status: 503,
+    type: "application/json",
+    retryAfter: "2",
+    body: JSON.stringify({
+      error: "Tracepanel's agent had stopped, and a new one has started: send the request again.",
+    }),
+  });
 });

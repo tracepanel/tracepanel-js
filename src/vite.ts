@@ -14,8 +14,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { Starter } from "./agent.js";
-import { answeredHere, forward, PREFIX } from "./proxy.js";
+import { type NoConsole, noConsole, Starter } from "./agent.js";
+import { answeredHere, forward, PREFIX, unavailable } from "./proxy.js";
 
 export interface TracepanelViteOptions {
   /** The backend project's directory, where its .tracepanel/ is. By default Vite's root and the folders above it. */
@@ -83,6 +83,17 @@ function storeDir(options: TracepanelViteOptions, root: string): string | undefi
   return resolve(root, options.dir ?? ".", process.env.TRACEPANEL_DIR ?? ".tracepanel");
 }
 
+/** Why no console answers: the backend's own (given) isn't up, or what keeps the project's agent from serving one. */
+function whyNoConsole(options: TracepanelViteOptions, root: string): Promise<NoConsole> {
+  const store = storeDir(options, root);
+  if (store) return noConsole(store);
+  const given = options.console ?? process.env.TRACEPANEL_CONSOLE;
+  return Promise.resolve({
+    title: "The console doesn't answer",
+    detail: `No console answers at ${given}: start the backend in development, or correct the plugin's console option (TRACEPANEL_CONSOLE).`,
+  });
+}
+
 // Scripts Vite serves for itself: its client and env (/@vite/), React's refresh runtime (/@react-refresh).
 const VITE_SOURCES = ["/@vite/", "/@react-refresh"];
 
@@ -111,12 +122,12 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
         const root = server.config.root;
         // No agent yet (the backend starts it on its first request): the page's first load starts it here instead.
         const address = consoleAddress(options, root) ?? started(root);
+        const why = () => whyNoConsole(options, root);
         if (!address) {
-          res.writeHead(503, { "Content-Type": "text/plain" });
-          res.end("No Tracepanel console yet: start the backend in development, or set the plugin's console.");
+          void why().then((reason) => unavailable(req, res, reason));
           return;
         }
-        forward(new URL(address), req, res, () => restarted(root));
+        forward(new URL(address), req, res, { restart: () => restarted(root), why });
       });
     },
     transformIndexHtml() {

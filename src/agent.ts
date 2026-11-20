@@ -4,7 +4,7 @@
 // agent starts on demand, as the other SDKs start it, and outlives the app's restarts.
 
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
@@ -177,6 +177,70 @@ export class Starter {
       closeSync(log);
     }
     return true;
+  }
+}
+
+/**
+ * Why the console doesn't answer, and what to do: what the proxy answers then (proxy.ts). The other SDKs say it in the
+ * same words.
+ */
+export interface NoConsole {
+  title: string;
+  detail: string;
+}
+
+/** What keeps the project's console from answering, as far as this process can tell. */
+export async function noConsole(storeDir: string): Promise<NoConsole> {
+  const configured = process.env.TRACEPANEL_CONSOLE_URL;
+  if (configured) {
+    return {
+      title: "The console doesn't answer",
+      detail: `No console answers at ${configured} (TRACEPANEL_CONSOLE_URL). Start the agent there with --serve, or correct the address.`,
+    };
+  }
+  const named = process.env.TRACEPANEL_AGENT;
+  if (named === "off") {
+    return {
+      title: "Tracepanel's agent is off",
+      detail:
+        "Tracepanel's agent is off (TRACEPANEL_AGENT=off): traces aren't kept and there is no console. Unset TRACEPANEL_AGENT to have the app start it.",
+    };
+  }
+  if (!autoStart()) {
+    return {
+      title: "No console for the named agent",
+      detail: `The agent named in TRACEPANEL_AGENT (${named}) serves no console here. Start it with --serve, and set TRACEPANEL_CONSOLE_URL to its console's address.`,
+    };
+  }
+  if (await listening(agentAddress(storeDir))) {
+    // The agent writes its console's address before its own: one that answers without a console was started so.
+    return {
+      title: "Tracepanel's agent runs without its console",
+      detail: `The project's agent runs without its console (it was started without --serve). Stop it: the next request starts one with its console. Store: ${storeDir}.`,
+    };
+  }
+  const binary = process.env.TRACEPANEL_AGENT_BIN;
+  if (binary ? !existsSync(binary) : !installedBinary()) {
+    return {
+      title: "No tracepanel-agent to start",
+      detail: binary
+        ? `TRACEPANEL_AGENT_BIN names ${binary}, which isn't there. Set it to the tracepanel-agent binary's path.`
+        : "No tracepanel-agent binary to start: install @tracepanel/agent (it comes with @tracepanel/js; npm --omit=optional leaves its platform package out), or set TRACEPANEL_AGENT_BIN to the agent's path.",
+    };
+  }
+  return {
+    title: "Tracepanel's agent didn't start",
+    detail: `Tracepanel's agent didn't start: ${join(storeDir, "agent.log")} says why. It is tried again within 30 seconds.`,
+  };
+}
+
+/** Whether npm installed the agent's binary for this platform (with @tracepanel/agent). */
+function installedBinary(): boolean {
+  try {
+    const agent = createRequire(import.meta.url)("@tracepanel/agent") as { binaryPath(): string };
+    return existsSync(agent.binaryPath());
+  } catch {
+    return false;
   }
 }
 
