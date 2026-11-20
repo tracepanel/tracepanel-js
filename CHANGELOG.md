@@ -1,8 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.17.0 (2026-11-20)
+
+Runs `tracepanel-agent` 0.17.0 (installed with it).
 
 ### Changed
+
+- Runs `tracepanel-agent` 0.17.0: a trace's DB, Cache and HTTP tabs show
+  share bars, totals and a section per call, and an SPA's pill heads with
+  its view or click. The request list loads fast on a big store.
 
 - `@tracepanel/js/angular` and `@tracepanel/js/vite` name the page's framework
   (Angular, React, Vue, Svelte, Solid, Preact; else Browser): the pill says it
