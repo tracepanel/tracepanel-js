@@ -96,6 +96,19 @@ test("a console given is used as it is, nothing started", async () => {
   expect(await (await fetch(`${base}/__tracepanel__/api/counts`)).text()).toBe("backend /__tracepanel__/api/counts");
 });
 
+test("a console given that doesn't answer: the page says to start the backend, and reloads until it answers", async () => {
+  const base = await vite({ console: "http://127.0.0.1:9/__tracepanel__/" });
+
+  const response = await fetch(`${base}/__tracepanel__/`, { headers: { accept: "text/html" } });
+  const page = await response.text();
+
+  expect([response.status, response.headers.get("retry-after")]).toEqual([503, "2"]);
+  expect(page).toContain('<meta http-equiv="refresh" content="2">');
+  expect(page).toContain(
+    "<p>No console answers at http://127.0.0.1:9/__tracepanel__/: start the backend in development, or correct the plugin&#39;s console option (TRACEPANEL_CONSOLE).</p>",
+  );
+});
+
 test("the page gets the widget, and the recording that leaves Vite's own client out", () => {
   const tags = tracepanel({ browser: { service: "shop-web" } }).transformIndexHtml();
 

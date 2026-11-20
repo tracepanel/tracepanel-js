@@ -14,10 +14,11 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
 import { context } from "@opentelemetry/api";
+import { noConsole } from "./agent.js";
 import type { BrowserOptions } from "./browser.js";
 import { headersOnResponses } from "./headers.js";
 import { ASKED, asks, REASON } from "./profile.js";
-import { answeredHere, browserModule, forward, PREFIX, recordingScript } from "./proxy.js";
+import { answeredHere, browserModule, forward, PREFIX, recordingScript, unavailable } from "./proxy.js";
 import type { Runtime } from "./runtime.js";
 import { start } from "./setup.js";
 
@@ -40,15 +41,15 @@ function answer(tracepanel: Runtime, req: IncomingMessage, res: ServerResponse):
   if (answeredHere(req, res)) return;
   // No agent yet (the app starts it on its first request): the page's widget starts it here instead.
   const address = tracepanel.console.get(true) || (tracepanel.starter.ensure() ? tracepanel.console.get(true) : "");
+  const why = () => noConsole(tracepanel.config.storeDir);
   if (!address) {
-    res.writeHead(503, { "Content-Type": "text/plain" });
-    res.end(`No Tracepanel console: its agent didn't start (see ${tracepanel.config.storeDir}/agent.log).`);
+    void why().then((reason) => unavailable(req, res, reason));
     return;
   }
   // The agent at that address went away (idle, a new build): a new one, and its console.
   const restart = async () =>
     (await tracepanel.starter.restart()) ? tracepanel.console.get(true) || undefined : undefined;
-  forward(new URL(address), req, res, restart);
+  forward(new URL(address), req, res, { restart, why });
 }
 
 /**
