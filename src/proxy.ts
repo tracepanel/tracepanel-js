@@ -41,7 +41,7 @@ export function forward(
   target: URL,
   req: IncomingMessage,
   res: ServerResponse,
-  restart?: () => string | undefined,
+  restart?: () => Promise<string | undefined>,
 ): void {
   const upstream = request(
     {
@@ -56,8 +56,8 @@ export function forward(
       answer.pipe(res);
     },
   );
-  upstream.on("error", () => {
-    const again = req.method === "GET" ? restart?.() : undefined;
+  upstream.on("error", async () => {
+    const again = req.method === "GET" ? await restart?.() : undefined;
     if (again) {
       forward(new URL(again), req, res);
       return;

@@ -90,7 +90,7 @@ export async function agentConsole(): Promise<string> {
   const consoleUrl = new ConsoleUrl(config.storeDir);
   if (await answers(consoleUrl.get(true))) return consoleUrl.get(true);
   // None answers at the address the project's agent left (it exited, or was killed): a new one starts.
-  if (!new Starter(config.storeDir).ensure(true)) return "";
+  if (!(await new Starter(config.storeDir).restart())) return "";
   for (let tries = 0; tries < 20; tries++) {
     if (await answers(consoleUrl.get(true))) return consoleUrl.get(true);
     await new Promise((done) => setTimeout(done, 50));

@@ -88,12 +88,19 @@ const VITE_SOURCES = ["/@vite/", "/@react-refresh"];
 
 export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
   let starter: Starter | undefined;
-  /** The project's agent, started as the SDKs start it (`gone`: the one at its address didn't answer); its console. */
-  const started = (root: string, gone: boolean): string | undefined => {
+  /** The project's agent, started as the SDKs start it; its console. */
+  const started = (root: string): string | undefined => {
     const store = storeDir(options, root);
     if (!store) return undefined;
     starter ??= new Starter(store);
-    return starter.ensure(gone) ? consoleAddress(options, root) : undefined;
+    return starter.ensure() ? consoleAddress(options, root) : undefined;
+  };
+  /** Its console once the one at its address didn't answer: that agent's still, or a new one's. */
+  const restarted = async (root: string): Promise<string | undefined> => {
+    const store = storeDir(options, root);
+    if (!store) return undefined;
+    starter ??= new Starter(store);
+    return (await starter.restart()) ? consoleAddress(options, root) : undefined;
   };
   return {
     name: "tracepanel",
@@ -103,13 +110,13 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
         if (answeredHere(req, res)) return;
         const root = server.config.root;
         // No agent yet (the backend starts it on its first request): the page's first load starts it here instead.
-        const address = consoleAddress(options, root) ?? started(root, false);
+        const address = consoleAddress(options, root) ?? started(root);
         if (!address) {
           res.writeHead(503, { "Content-Type": "text/plain" });
           res.end("No Tracepanel console yet: start the backend in development, or set the plugin's console.");
           return;
         }
-        forward(new URL(address), req, res, () => started(root, true));
+        forward(new URL(address), req, res, () => restarted(root));
       });
     },
     transformIndexHtml() {
