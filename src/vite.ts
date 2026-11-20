@@ -39,6 +39,7 @@ interface ViteServer {
 interface Plugin {
   name: string;
   apply: "serve";
+  configResolved(config: { root: string }): void;
   configureServer(server: ViteServer): void;
   transformIndexHtml(): {
     tag: string;
@@ -94,11 +95,57 @@ function whyNoConsole(options: TracepanelViteOptions, root: string): Promise<NoC
   });
 }
 
+// The frameworks a page may be made with, by the package that says so, as the console names them: Preact before React
+// (an app on preact/compat may list react too), Angular (Analog) first.
+const FRAMEWORKS: [pkg: string, name: string][] = [
+  ["@angular/core", "Angular"],
+  ["preact", "Preact"],
+  ["solid-js", "Solid"],
+  ["svelte", "Svelte"],
+  ["vue", "Vue"],
+  ["react", "React"],
+];
+
+/** A package.json's fields, if the file is there and is JSON. */
+function packageJson(file: string): { version?: unknown; dependencies?: object; devDependencies?: object } | undefined {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The version of `pkg` installed for the project at `root`: in its node_modules or one above it. */
+function installedVersion(root: string, pkg: string): string | undefined {
+  for (let folder = root; ; folder = dirname(folder)) {
+    const version = packageJson(join(folder, "node_modules", pkg, "package.json"))?.version;
+    if (typeof version === "string") return version;
+    if (dirname(folder) === folder) return undefined;
+  }
+}
+
+/**
+ * The page's framework, from the project's package.json, with its installed version: "React 19.2.0". None for one it
+ * doesn't name: the page is then said to run in the browser, never as the API its calls reach.
+ */
+function pageFramework(root: string): string | undefined {
+  const project = packageJson(join(root, "package.json"));
+  if (!project) return undefined;
+  const listed = { ...project.devDependencies, ...project.dependencies };
+  const found = FRAMEWORKS.find(([pkg]) => pkg in listed);
+  if (!found) return undefined;
+  const [pkg, name] = found;
+  const version = installedVersion(root, pkg);
+  return version ? `${name} ${version}` : name;
+}
+
 // Scripts Vite serves for itself: its client and env (/@vite/), React's refresh runtime (/@react-refresh).
 const VITE_SOURCES = ["/@vite/", "/@react-refresh"];
 
 export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
   let starter: Starter | undefined;
+  // The page's framework, read once Vite knows the project's root.
+  let framework: string | undefined;
   /** The project's agent, started as the SDKs start it; its console. */
   const started = (root: string): string | undefined => {
     const store = storeDir(options, root);
@@ -116,6 +163,9 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
   return {
     name: "tracepanel",
     apply: "serve",
+    configResolved(config) {
+      framework = pageFramework(config.root);
+    },
     configureServer(server) {
       server.middlewares.use(PREFIX, (req, res) => {
         if (answeredHere(req, res)) return;
@@ -131,14 +181,22 @@ export function tracepanel(options: TracepanelViteOptions = {}): Plugin {
       });
     },
     transformIndexHtml() {
+      // What the pill says served the page, as a server SDK labels its pages: its framework in the browser.
+      const runtime = framework ? `Browser · ${framework}` : "Browser";
       const widget = {
         tag: "script",
-        attrs: { src: `${PREFIX}widget.min.js`, "data-tracepanel-api": PREFIX, defer: true },
+        attrs: {
+          src: `${PREFIX}widget.min.js`,
+          "data-tracepanel-api": PREFIX,
+          "data-tracepanel-runtime": runtime,
+          defer: true,
+        },
         injectTo: "head-prepend" as const,
       };
       if (options.browser === false) return [widget];
       // The dev server's own client logs (HMR, its connection) aren't the page's: by where they come from.
-      const settings = JSON.stringify({ api: PREFIX, ignoreSources: VITE_SOURCES, ...options.browser });
+      const page = { api: PREFIX, ignoreSources: VITE_SOURCES, ...(framework ? { framework } : {}) };
+      const settings = JSON.stringify({ ...page, ...options.browser });
       const recording = {
         tag: "script",
         attrs: { type: "module" },

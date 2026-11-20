@@ -1,6 +1,6 @@
 // @tracepanel/js/vite: the widget and the browser recording in the page, and the backend's console on Vite's origin,
 // for this machine only, with the backend's agent started when none runs yet.
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -114,7 +114,12 @@ test("the page gets the widget, and the recording that leaves Vite's own client 
 
   expect(tags.map((tag) => tag.attrs)).toEqual([
     { type: "module" },
-    { src: "/__tracepanel__/widget.min.js", "data-tracepanel-api": "/__tracepanel__/", defer: true },
+    {
+      src: "/__tracepanel__/widget.min.js",
+      "data-tracepanel-api": "/__tracepanel__/",
+      "data-tracepanel-runtime": "Browser",
+      defer: true,
+    },
   ]);
   expect(JSON.parse(tags[0]?.children?.match(/record\((.*)\);$/)?.[1] ?? "null")).toEqual({
     api: "/__tracepanel__/",
@@ -129,4 +134,37 @@ test("browser: false leaves the recording out", () => {
       .transformIndexHtml()
       .map((tag) => tag.attrs.src),
   ).toEqual(["/__tracepanel__/widget.min.js"]);
+});
+
+/** The plugin on a project whose package.json lists `deps`, those in `installed` in its node_modules at a version. */
+function onProject(deps: Record<string, string>, installed: Record<string, string> = {}) {
+  writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: deps, devDependencies: {} }));
+  for (const [pkg, version] of Object.entries(installed)) {
+    mkdirSync(join(root, "node_modules", pkg), { recursive: true });
+    writeFileSync(join(root, "node_modules", pkg, "package.json"), JSON.stringify({ name: pkg, version }));
+  }
+  const plugin = tracepanel();
+  plugin.configResolved({ root });
+  const [recording, widget] = plugin.transformIndexHtml();
+  return {
+    runtime: widget?.attrs["data-tracepanel-runtime"],
+    framework: JSON.parse(recording?.children?.match(/record\((.*)\);$/)?.[1] ?? "null")?.framework,
+  };
+}
+
+test("the page's framework, with its installed version, is what the pill says served it and what the console names", () => {
+  expect(onProject({ react: "^19.2.0", "react-dom": "^19.2.0" }, { react: "19.2.1" })).toEqual({
+    runtime: "Browser · React 19.2.1",
+    framework: "React 19.2.1",
+  });
+  // An app on preact/compat lists react too: it is Preact.
+  expect(onProject({ preact: "^10.27.0", react: "npm:@preact/compat" }, { preact: "10.27.2" })).toEqual({
+    runtime: "Browser · Preact 10.27.2",
+    framework: "Preact 10.27.2",
+  });
+});
+
+test("a framework not installed yet is named without a version; a project with none is the browser", () => {
+  expect(onProject({ vue: "^3.6.0" })).toEqual({ runtime: "Browser · Vue", framework: "Vue" });
+  expect(onProject({ lodash: "^4.17.21" })).toEqual({ runtime: "Browser", framework: undefined });
 });
