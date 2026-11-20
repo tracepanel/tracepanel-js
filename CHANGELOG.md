@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- An agent another app had just started, or a busy one, keeps its address
+  files: the SDK no longer removes them when its hello fails, so apps reach it.
+
 ## 0.16.1 (2026-11-19)
 
 ### Fixed

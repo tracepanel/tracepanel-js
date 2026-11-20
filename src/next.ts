@@ -46,7 +46,8 @@ function answer(tracepanel: Runtime, req: IncomingMessage, res: ServerResponse):
     return;
   }
   // The agent at that address went away (idle, a new build): a new one, and its console.
-  const restart = () => (tracepanel.starter.ensure(true) ? tracepanel.console.get(true) || undefined : undefined);
+  const restart = async () =>
+    (await tracepanel.starter.restart()) ? tracepanel.console.get(true) || undefined : undefined;
   forward(new URL(address), req, res, restart);
 }
 

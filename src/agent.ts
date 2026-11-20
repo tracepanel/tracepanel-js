@@ -4,7 +4,7 @@
 // agent starts on demand, as the other SDKs start it, and outlives the app's restarts.
 
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
@@ -19,6 +19,8 @@ const BATCH_SIZE = 50;
 const BATCH_WAIT_MS = 50;
 const RETRY_AFTER_MS = 5000;
 const START_WAIT_MS = 1500;
+// A bare connect to the agent's address: an agent on this machine accepts at once.
+const PROBE_TIMEOUT_MS = 250;
 const CONSOLE_CHECK_MS = 2000;
 const IDLE_EXIT_S = "1800";
 // An agent that exited (idle, killed, replaced by a new build) is started anew at once; one that couldn't start is
@@ -60,30 +62,108 @@ function warn(message: string): void {
   process.stderr.write(`tracepanel: ${message}\n`);
 }
 
-/** Starts the project's agent when none answers, in its own session, serving the console on a free port. */
+/** A socket connecting to the agent's address, `unix:/path` or `tcp:host:port`; undefined for neither kind. */
+function connectTo(address: string): Socket | undefined {
+  const target = address.startsWith("unix:")
+    ? { path: address.slice("unix:".length) }
+    : address.startsWith("tcp:")
+      ? hostPort(address.slice("tcp:".length))
+      : undefined;
+  if (!target) return undefined;
+  try {
+    return connect(target);
+  } catch {
+    // A port that isn't one.
+    return undefined;
+  }
+}
+
+/** Whether an agent listens at the address (a bare connect): an address file alone may be a stopped agent's. */
+function listening(address: string): Promise<boolean> {
+  const socket = connectTo(address);
+  if (!socket) return Promise.resolve(false);
+  return new Promise((done) => {
+    const end = (answered: boolean) => {
+      socket.destroy();
+      done(answered);
+    };
+    socket.setTimeout(PROBE_TIMEOUT_MS, () => end(false));
+    socket.once("error", () => end(false));
+    socket.once("connect", () => end(true));
+  });
+}
+
+/**
+ * Starts the project's agent when none answers, in its own session, serving the console on a free port. It never
+ * removes the agent's addresses: they may be another process's agent's, starting or busy this very moment. One that
+ * didn't exit cleanly (killed, a reboot) leaves its own to the next agent, which removes them while it holds the
+ * store's lock.
+ */
 export class Starter {
   private failedAt = Number.NEGATIVE_INFINITY;
+  private restarting: Promise<boolean> | undefined;
 
   constructor(private readonly storeDir: string) {}
 
   /**
-   * Whether an agent runs for the project: one already does, or this process starts it (RESTART_MS after a failure).
-   * `gone`: the agent at the project's address didn't answer. One that didn't exit cleanly (killed, a reboot) leaves
-   * its addresses: they go before a new one starts.
+   * Whether an agent runs for the project: one wrote its address already, or this process starts it (RESTART_MS after
+   * a failure). It waits for the address, so a request that starts the agent can name its console.
    */
-  ensure(gone = false): boolean {
-    if (!gone && agentAddress(this.storeDir)) return true;
-    if (!autoStart() || Date.now() - this.failedAt < RESTART_MS) return false;
-    if (gone) for (const name of ["agent.addr", "console.addr"]) rmSync(join(this.storeDir, name), { force: true });
-    this.start();
-    const started = agentAddress(this.storeDir) !== "";
-    if (!started) this.failedAt = Date.now();
-    return started;
+  ensure(): boolean {
+    if (agentAddress(this.storeDir)) return true;
+    if (!this.mayStart()) return false;
+    if (!this.spawn()) return this.failed();
+    // There was no address: the one there now is an agent's that listens (this one, or another process's).
+    const deadline = Date.now() + START_WAIT_MS;
+    while (Date.now() < deadline && !agentAddress(this.storeDir)) {
+      // The first trace waits a moment for the agent's address: it's the one place a request waits on it.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    return this.started(agentAddress(this.storeDir) !== "");
   }
 
-  private start(): void {
+  /**
+   * Whether an agent answers for the project once the one at its address didn't take the app's hello or a request:
+   * it does still (busy, starting), or this process starts one (RESTART_MS after a failure) and waits until it does.
+   */
+  restart(): Promise<boolean> {
+    this.restarting ??= this.answering().finally(() => {
+      this.restarting = undefined;
+    });
+    return this.restarting;
+  }
+
+  private async answering(): Promise<boolean> {
+    if (await listening(agentAddress(this.storeDir))) return true;
+    if (!this.mayStart()) return false;
+    if (!this.spawn()) return this.failed();
+    // Until its address answers: the file may still be the stopped agent's (a unix socket's is the same path each
+    // time). Another process's agent may win the race (one per store): then it is that one's that answers.
+    const deadline = Date.now() + START_WAIT_MS;
+    while (!(await listening(agentAddress(this.storeDir)))) {
+      if (Date.now() >= deadline) return this.started(false);
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    return this.started(true);
+  }
+
+  private mayStart(): boolean {
+    return autoStart() && Date.now() - this.failedAt >= RESTART_MS;
+  }
+
+  private started(started: boolean): boolean {
+    if (!started) warn(`the agent didn't start (see ${join(this.storeDir, "agent.log")})`);
+    return started || this.failed();
+  }
+
+  private failed(): false {
+    this.failedAt = Date.now();
+    return false;
+  }
+
+  private spawn(): boolean {
     const binary = agentBinary();
-    if (!binary) return;
+    if (!binary) return false;
     mkdirSync(this.storeDir, { recursive: true });
     const log = openSync(join(this.storeDir, "agent.log"), "a");
     try {
@@ -96,12 +176,7 @@ export class Starter {
     } finally {
       closeSync(log);
     }
-    const deadline = Date.now() + START_WAIT_MS;
-    while (Date.now() < deadline && !agentAddress(this.storeDir)) {
-      // The first trace waits a moment for the agent's address: it's the one place a request waits on it.
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-    }
-    if (!agentAddress(this.storeDir)) warn(`the agent didn't start (see ${join(this.storeDir, "agent.log")})`);
+    return true;
   }
 }
 
@@ -249,7 +324,7 @@ export class Sender {
 
   private async open(): Promise<Socket | undefined> {
     let socket = await this.handshake(agentAddress(this.config.storeDir));
-    if (!socket && this.starter.ensure(true)) socket = await this.handshake(agentAddress(this.config.storeDir));
+    if (!socket && (await this.starter.restart())) socket = await this.handshake(agentAddress(this.config.storeDir));
     if (socket) {
       this.socket = socket;
       socket.unref();
@@ -263,14 +338,9 @@ export class Sender {
 
   /** A connection the agent accepted after the hello line, or undefined. */
   private handshake(address: string): Promise<Socket | undefined> {
-    const target = address.startsWith("unix:")
-      ? { path: address.slice("unix:".length) }
-      : address.startsWith("tcp:")
-        ? hostPort(address.slice("tcp:".length))
-        : undefined;
-    if (!target) return Promise.resolve(undefined);
+    const socket = connectTo(address);
+    if (!socket) return Promise.resolve(undefined);
     return new Promise((done) => {
-      const socket = connect(target);
       const fail = () => {
         socket.destroy();
         done(undefined);
